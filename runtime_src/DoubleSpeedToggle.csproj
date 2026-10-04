@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    「双倍加速」Mod —— 托管运行时程序集。
+    「三倍加速」Mod —— 托管运行时程序集。
 
     刻意不用 Godot.NET.Sdk（要联网还原包 + 源码生成器）；本入口只用
     Godot 普通 API 和游戏程序集的公开成员。

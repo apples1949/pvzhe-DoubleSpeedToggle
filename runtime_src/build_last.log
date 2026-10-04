@@ -2,13 +2,13 @@
 0 个警告
     0 个错误
 
-已用时间 00:00:03.17
+已用时间 00:00:03.64
 [copy] JTYDoubleSpeedToggle.dll -> Runtime/ModAssembly.dll（15872 B）
 [compile] OK
 [package] RC=0
 OK -> C:\Users\apples1949\Desktop\植物大战僵尸杂交重制版\mods\DoubleSpeedToggle\dist\DoubleSpeedToggle.pmod
-  大小: 8576 字节
+  大小: 8639 字节
   内容: ['mod.json', 'Runtime/ModAssembly.dll']
-  包内 DLL md5: a7eacaa8e6928b85f8250db7d9dd8db5 （应与 bin/Release 及装机包一致）
-[install] C:\Users\apples1949\AppData\Roaming\Godot\app_userdata\植物大战僵尸杂交版\Mods\DoubleSpeedToggle.pmod (8576 B)
+  包内 DLL md5: d41b0d0338d32713c702ca7fdf18fc70 （应与 bin/Release 及装机包一致）
+[install] C:\Users\apples1949\AppData\Roaming\Godot\app_userdata\植物大战僵尸杂交版\Mods\DoubleSpeedToggle.pmod (8639 B)
 [cache] move rc=0 1 dir(s) moved.

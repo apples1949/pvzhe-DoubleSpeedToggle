@@ -1,12 +1,12 @@
 // ============================================================================
-//  「双倍加速」Mod —— 在游戏自带「加速」复选框的**左侧**新增一个勾选框。
+//  「三倍加速」Mod —— 在游戏自带「加速」复选框的**正下方**新增一个勾选框。
 //
 //  行为（用户需求 2026-10-01）：
 //    · 勾选本勾选框 ⇒ 在**原有加速的基础上再双倍**（= 原有加速速度 ×2）
 //    · 同时**取消原有的加速**（两者互斥，绝不会叠加成两层）
 //    · 再次点击本勾选框取消 ⇒ 回到普通速度
 //    · 取消勾选原加速时，本勾选框也同步取消（不会残留"只勾了新框"的错觉）
-//    · 位置：原「加速」左侧，**不与右下角的「时停」按钮冲突**
+//    · 位置：原「加速」**正下方**（两个加速框相邻）；「时停」由 TimeStop v1.0.31+ 自动排到本框之后
 //
 //  ── 游戏原有加速是怎么实现的（读源码得到的硬事实）────────────────────
 //   `Scene/TowerDefesne/TowerDefenseControl.cs`：
@@ -31,7 +31,7 @@
 //  ── 按钮位置为什么不会撞「时停」──────────────────────────────────────
 //   「时停」(TimeStop) 把自己挂在**左下角齿轮 optionButton 的右侧**
 //   （`anchorBtn.GlobalPosition.Y + anchorBtn.Size.Y + 6f`，见 TimeStopEntry.cs）。
-//   本 Mod 挂的是**右上角「加速」的左侧**（`CheckBox2X`，GUITop 下，
+//   本 Mod 挂的是**右上角「加速」的正下方**（`CheckBox2X`，GUITop 下，
 //   anchor_left=1.0、offset_left=-107、offset_top=64）。两者相隔整个屏幕。
 //
 //  ── 踩坑（本项目已付出代价的）────────────────────────────────────────
@@ -76,7 +76,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	private const string BoxInitText = "3x";
 
 	/// <summary>日志里用的中文名（**不显示在界面上** —— 界面显示实际倍率）。</summary>
-	private const string BoxText = "双倍加速";
+	private const string BoxText = "三倍加速";
 
 	/// <summary>
 	/// 诊断日志总开关。排查时置 true 重新编译。
@@ -136,7 +136,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 			_context = context;
 			string root = (context == null) ? "<null>" : context.PackageRoot;
 			Info("初始化完成；PackageRoot=" + root
-				+ "。将在「加速」左侧新增「" + BoxText + "」勾选框（= 原加速 ×"
+				+ "。将在「加速」正下方新增「" + BoxText + "」勾选框（= 原加速 ×"
 				+ DoubleFactor.ToString("0.##") + "）。");
 		}
 		catch (Exception ex)
@@ -352,7 +352,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	}
 
 	/// <summary>
-	/// 每帧把自建勾选框摆到「加速」左侧，并与它的可见性保持一致。
+	/// 每帧把自建勾选框摆到「加速」正下方，并与它的可见性保持一致。
 	///
 	/// 定位用 `offset_*` 而不是 `GlobalPosition`：两者同父、同锚点（右上角），
 	/// offset 天然跟随窗口缩放与父节点变换，不需要自己做坐标换算。
