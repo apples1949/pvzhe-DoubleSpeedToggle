@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "id": "doublespeedtoggle",
+  "name": "双倍加速",
+  "version": "1.0.5",
+  "author": "本地",
+  "description": "在游戏自带「加速」复选框的**正下方**新增一个「双倍加速」勾选框：勾选后在原有加速的基础上再乘 2，同时自动取消原有的加速（互斥），取消勾选回到普通速度。v1.0.5：勾选框**整体大小与原版完全一致**（原版带 scale 0.78，本框此前用 1 所以偏大；现连 scale 与布局尺寸一起对齐）。v1.0.4：紧贴「加速」下方（两个加速框相邻），「时停」自动排到本框之下。v1.0.3：界面文本显示实际倍率（普通关 1.5x 与 3x）。",
+  "dependencies": [],
+  "conflicts": [],
+  "provides": {},
+  "overrides": {},
+  "scripts": [],
+  "runtimeAssembly": "Runtime/ModAssembly.dll",
+  "runtimeEntryType": "DoubleSpeedToggleEntry",
+  "runtimeApiVersion": 1,
+  "runtimeAssemblyPolicy": "optional",
+  "blueprints": [],
+  "translations": [],
+  "resources": [
+    "Runtime/ModAssembly.dll"
+  ]
+}
