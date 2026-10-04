@@ -84,7 +84,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	///   本项目踩过：脚本批量替换时把方法体自己也换了 ⇒ 无限递归 ⇒
 	///   `StackOverflowException`（catch 抓不住，直接终止线程）。
 	/// </summary>
-	private static readonly bool EnableDiagLog = true;
+	private static readonly bool EnableDiagLog = false;
 
 	private XWModRuntimeContext _context;
 	private SceneTree _tree;
