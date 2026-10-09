@@ -1,6 +1,0 @@
-<!-- 三倍图：最终显示 110x36（外框）/ 32x28（单格）。圆角/描边均为 1× 值的 3 倍 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="330" height="108" viewBox="0 0 330 108">
-  <!-- 外框：圆角 27(=9*3) 实际显示 10 的观感由 9-slice 保留 -->
-  <rect x="3" y="3" width="324" height="102" rx="27" ry="27"
-        fill="#0D0805" stroke="#050303" stroke-width="6"/>
-</svg>
