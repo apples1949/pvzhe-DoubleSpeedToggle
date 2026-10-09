@@ -65,7 +65,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	/// `anchorBtn.GlobalPosition.Y + anchorBtn.Size.Y + 6f`（见 TimeStopEntry.cs），
 	/// 这样三个控件的间距看起来是同一套。
 	/// </summary>
-	private const float VGapPx = 6f;
+	private const float VGapPx = -4f;   // ★ v1.1.11：负值 —— 抵消两个复选框控件内部的空白（各自约 7px），让图标真正贴近
 
 	/// <summary>
 	/// 勾选框**初始**文本（v1.0.3）。
@@ -85,6 +85,91 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	///   `StackOverflowException`（catch 抓不住，直接终止线程）。
 	/// </summary>
 	private static readonly bool EnableDiagLog = false;
+
+	// ================================================================ 按钮样式（内部开关）
+
+	/// <summary>
+	/// 加速按钮样式 —— **改这里 + 重新构建**即可切换：
+	///   1 = 三格横排（`->` `->>` `->>>`）
+	///   2 = 三格竖排（上下结构，矩形更高）
+	///   3 = 单格：只显示当前档位，单击循环
+	///   4 = 原有复选框（游戏「加速」+ 本 Mod 复选框两个）
+	///
+	/// 样式 1/2/3 会**隐藏游戏自带的「加速」复选框**并在它的位置放自建选择器 ——
+	/// 因为三档里已经包含了"原版加速"这一档，两套并存会重复且互相打架。
+	/// </summary>
+	internal enum BtnStyle
+	{
+		TriHorizontal = 1,
+		TriVertical = 2,
+		SingleGear = 3,
+		CheckBox = 4,
+	}
+
+	private const BtnStyle Style = BtnStyle.TriHorizontal;   // 当前 = 样式 1（三格横排）
+
+	// ★ 点击方式（2026-10-09 用户定稿）：**不再提供开关**。
+	//   样式 1/2 是三格各对应一档 ⇒ **点哪档就跳哪档**（直接选中）；
+	//   样式 3 只有一格 ⇒ 只能**单击循环**。其余方式（整条循环 / 混合）已按用户要求删除。
+
+	/// <summary>三档的箭头字形（用户给的三段式箭头图：单箭头 / 双箭头 / 三箭头）。</summary>
+	private static readonly string[] GearArrow = { "->", "->>", "->>>" };
+
+	/// <summary>档位文案（只在日志里用，不显示在界面上）。</summary>
+	private static readonly string[] GearName = { "正常速度", "游戏加速", "Mod 加速" };
+
+	// 配色（2026-10-09 用户定稿）：**颜色表示档位**
+	//   档位 1（正常速度）= 绿 ；档位 2（游戏加速）= 橙 ；档位 3（Mod 加速）= 红
+	private static readonly Color[] GearBg =
+	{
+		new Color(0.18f, 0.72f, 0.26f),   // 档位 1 · 绿
+		new Color(1.00f, 0.52f, 0.06f),   // 档位 2 · 橙
+		new Color(0.86f, 0.13f, 0.09f),   // 档位 3 · 红
+	};
+	// 未选中态：同色压暗（样式 1/2 三格并存时，靠明暗区分"当前选中"）
+	private static readonly Color[] GearBgDim =
+	{
+		new Color(0.09f, 0.36f, 0.13f),
+		new Color(0.50f, 0.26f, 0.03f),
+		new Color(0.43f, 0.07f, 0.05f),
+	};
+	// 文字：白字 + 黑描边（在绿/橙/红上都清楚）
+	private static readonly Color CellFg = new Color(1.00f, 1.00f, 1.00f);
+	private static readonly Color CellFgOutline = new Color(0f, 0f, 0f, 1f);
+	private static readonly Color FrameBg = new Color(0.05f, 0.03f, 0.02f);
+	private static readonly Color FrameLine = new Color(0.02f, 0.01f, 0.01f);
+
+	/// <summary>
+	/// 是否使用手绘素材（`Resources/*.png`）。
+	///   true  = 外框/格子/箭头全部用贴图（箭头是图形，不受字体影响）
+	///   false = 退回**纯代码绘制**（StyleBoxFlat + 文字箭头 `<->`）——素材缺失时也会自动退回
+	/// </summary>
+	private static readonly bool UseArt = true;
+
+	/// <summary>素材模式下单格的基准尺寸（1× 逻辑像素；贴图是 3 倍图，靠九宫拉伸）。</summary>
+	private const float ArtCellW = 32f;
+	private const float ArtCellH = 28f;
+	/// <summary>九宫边距：贴图里不可拉伸的区域（= 3 倍图下的圆角 + 描边）。</summary>
+	private const int ArtMargin = 30;
+
+	/// <summary>箭头基础字号（装不下的格子会自动按比例缩小）。</summary>
+	private const int CellFontSize = 16;
+	/// <summary>格子样式里的左右内边距合计（见 EnsureCellStyles）。</summary>
+	private const float CellMarginX = 4f;
+
+	/// <summary>每格宽 / 高（像素，未缩放）。</summary>
+	private const float CellW = 26f;   // ★ v1.1.5：只作下限；实际宽度由一二档文字决定
+	private const float CellH = 28f;
+	/// <summary>竖排（样式 2）时每格高一点 —— 用户要求矩形高度可以做高点。</summary>
+	private const float CellHVertical = 34f;
+	/// <summary>格间距 —— 透出深色底框，形成参考图里那种"分格线"。</summary>
+	private const float CellGap = 3f;
+	/// <summary>外框内边距。</summary>
+	private const float FramePad = 2f;
+	/// <summary>外框圆角（参考图是胶囊形，圆角给大些）。</summary>
+	private const float FrameRadius = 10f;
+	/// <summary>样式 1/2/3 的选择器根节点名（**必须以 Mod 开头** —— 「时停」靠这个前缀把它当成 Mod 控件、自动排到下方）。</summary>
+	private const string SelName = "ModSpeedSelector";
 
 	private XWModRuntimeContext _context;
 	private SceneTree _tree;
@@ -117,6 +202,58 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 
 	/// <summary>文本刷新节流计数（v1.0.3：每 30 帧重算一次实际倍率文本）。</summary>
 	private int _textTick;
+
+	// ---------------- 三档选择器（样式 1/2/3） ----------------
+
+	/// <summary>自建三档选择器根节点。</summary>
+	private Control _sel;
+
+	/// <summary>选择器的格子按钮（样式 1/2 = 3 个；样式 3 = 1 个）。</summary>
+	private readonly System.Collections.Generic.List<Button> _cells
+		= new System.Collections.Generic.List<Button>();
+
+	/// <summary>当前档位：0 = 正常速度，1 = 游戏加速，2 = 本 Mod 加速。</summary>
+	private int _gear;
+	/// <summary>档位是否已经真正设过一次 —— 用来区分初始的 0 和用户点了档位 0。</summary>
+	private bool _gearInit;
+
+	/// <summary>选择器创建日志只报一次。</summary>
+	private bool _selBuilt;
+
+	/// <summary>宽度诊断只报一次。</summary>
+	private bool _widthReported;
+
+	/// <summary>是否曾经把游戏自带复选框藏起来过（未开始/离场时要还原成原样）。</summary>
+	private bool _hidVanilla;
+
+	/// <summary>藏起来之前，游戏自带复选框**本来**是不是可见的（还原用）。</summary>
+	private bool _vanillaPrevVisible = true;
+
+	/// <summary>复用的 StyleBox（按档位 3 个"亮"+3 个"暗"，避免每帧 new）。素材/代码两种模式共用。</summary>
+	private StyleBox[] _sbGear;
+	private StyleBox[] _sbGearDim;
+	private StyleBoxFlat _sbFrameFlat;
+	private StyleBoxTexture _sbFrameArt;
+
+	/// <summary>素材贴图（从包解压根目录的 Resources/ 读，不用 res:// 映射）。</summary>
+	private Texture2D _texFrame;
+	private readonly System.Collections.Generic.Dictionary<string, Texture2D> _texCell
+		= new System.Collections.Generic.Dictionary<string, Texture2D>();
+	private readonly Texture2D[] _texArrow = new Texture2D[3];
+	private bool _artTried;
+	private bool _artOk;
+
+	/// <summary>当前样式素材的 1× 尺寸（EnsureArt 里取；供布局直接使用）。</summary>
+	private float _artW = 110f;
+	private float _artH = 36f;
+	/// <summary>素材模式下算出的格高。</summary>
+	private float cellMaxH = 28f;
+
+	/// <summary>素材是否可用（UseArt 且 11 张图都读到了）。</summary>
+	private bool ArtOn
+	{
+		get { return UseArt && _artOk; }
+	}
 
 	/// <summary>
 	/// 类型查找缓存（v1.0.3）。
@@ -209,6 +346,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 				{
 					_box.Visible = false;
 				}
+				HideSelector();
 				if (!_reportedNoVanilla)
 				{
 					_reportedNoVanilla = true;
@@ -219,9 +357,33 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 			_reportedNoVanilla = false;
 			_vanilla = vanilla;
 
-			EnsureBox(vanilla);
-			SyncBox(vanilla);
-			EnforceMutualExclusion();     // 反方向互斥：玩家点了原「加速」⇒ 取消我方
+			// ★ 用户要求（2026-10-09）：**游戏没正式开始时不显示**。
+			//   判定用游戏自己的 `TowerDefenseManager.Instance.IsGameRunning()`
+			//   （全工程 121 处在用，选卡/关卡预览阶段为 false）。
+			//   未开始时：收起自建控件，并把游戏自带复选框**还原成我们动它之前的样子**。
+			if (!IsGameRunning())
+			{
+				HideSelector();
+				HideCheckBox();
+				RestoreVanillaVisibility(vanilla);
+				return;
+			}
+
+			if (Style == BtnStyle.CheckBox)
+			{
+				// 样式 4：原有复选框（且已把与「加速」的间距拉短）
+				HideSelector();
+				EnsureBox(vanilla);
+				SyncBox(vanilla);
+			}
+			else
+			{
+				// 样式 1/2/3：自建三档选择器；隐藏游戏自带复选框（三档里已含"原版加速"）
+				HideCheckBox();
+				EnsureSelector(vanilla);
+				SyncSelector(vanilla);
+			}
+			EnforceMutualExclusion();
 		}
 		catch (Exception ex)
 		{
@@ -529,24 +691,9 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 			{
 				return;
 			}
-			_on = pressed;
-			if (pressed)
-			{
-				// ① 取消原有加速（互斥）
-				SetVanillaPressed(false);
-				// ② 在"原加速档位"基础上再乘 DoubleFactor
-				ApplyTimeScale(DoubleFactor);
-				PlaySound("2XSpeedOn");
-				Info("开启" + BoxText + "：TimeScale → " + CurrentTimeScaleText());
-			}
-			else
-			{
-				// 取消 ⇒ 回到普通速度（此时原有加速已被我们关掉）
-				ApplyTimeScale(1.0 / DoubleFactor);
-				PlaySound("2XSpeedDown");
-				Info("关闭" + BoxText + "：TimeScale → " + CurrentTimeScaleText());
-			}
-			// 取消本框时，若原加速曾被我们关掉，保持关掉状态（用户要自己重新点）
+			// 样式 4 只有两态：勾上 = 档位 2（Mod 加速）、取消 = 档位 0（正常速度）
+			// （档位 1 = 游戏加速由游戏自带复选框自己负责）
+			ApplyGear(pressed ? 2 : 0);
 		}
 		catch (Exception ex)
 		{
@@ -560,36 +707,41 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	/// </summary>
 	private double VanillaAccelScale()
 	{
+		// 直接由 BaseTimeScale 推导（它内部已吞异常），这里不必再包 try
+		return BaseTimeScale() * (IsQuizLevel() ? 3.0 : 1.5);
+	}
+
+	/// <summary>
+	/// 本关的 `baseTimeScale`（默认 1.0；**有 14 个关卡显式写了 2.0**：
+	/// MiniGames_Level13_1~13_6（+_D）、Challenge_Level_Diamond7_2（+_D））。
+	/// 档位 0（正常速度）用的就是它。
+	/// </summary>
+	private double BaseTimeScale()
+	{
+		double baseTs = 1.0;
 		try
 		{
-			double baseTs = 1.0;
-			try
+			object cfg = null;
+			object mgr = GetSingleton("TowerDefenseManager");
+			if (mgr != null)
 			{
-				object cfg = null;
-				object mgr = GetSingleton("TowerDefenseManager");
-				if (mgr != null)
+				cfg = GetMember(mgr, "currentLevelConfig");
+				object ctl = GetMember(mgr, "currentControl");
+				if (cfg == null && ctl != null)
 				{
-					cfg = GetMember(mgr, "currentLevelConfig");
-					object ctl = GetMember(mgr, "currentControl");
-					if (cfg == null && ctl != null)
-					{
-						cfg = GetMember(ctl, "levelConfig");
-					}
-				}
-				if (cfg != null)
-				{
-					object b = GetMember(cfg, "baseTimeScale");
-					if (b is double bd) { baseTs = bd; }
-					else if (b is float bf) { baseTs = bf; }
+					cfg = GetMember(ctl, "levelConfig");
 				}
 			}
-			catch { }
-			if (baseTs <= 0.0) { baseTs = 1.0; }
-			// 测验关（QUIZ）用 3.0，其余 1.5 —— 与 CheckBox2XToggled 完全一致
-			double mult = IsQuizLevel() ? 3.0 : 1.5;
-			return baseTs * mult;
+			if (cfg != null)
+			{
+				object b = GetMember(cfg, "baseTimeScale");
+				if (b is double bd) { baseTs = bd; }
+				else if (b is float bf) { baseTs = bf; }
+			}
 		}
-		catch { return 1.5; }
+		catch { }
+		if (baseTs <= 0.0) { baseTs = 1.0; }
+		return baseTs;
 	}
 
 	private bool IsQuizLevel()
@@ -619,9 +771,14 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	/// <summary>把 `Global.TimeScale` 设为「原加速档位 × factor」。</summary>
 	private void ApplyTimeScale(double factor)
 	{
+		SetTimeScaleRaw(VanillaAccelScale() * factor);
+	}
+
+	/// <summary>把 `Global.TimeScale` **直接设为给定值**（三档模型用）。</summary>
+	private void SetTimeScaleRaw(double want)
+	{
 		try
 		{
-			double want = VanillaAccelScale() * factor;
 			object g = GetSingleton("Global");
 			if (g == null)
 			{
@@ -646,7 +803,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 					_lastLoggedBase = want;
 					Diag("TimeScale 设为 " + want.ToString("0.###")
 						+ "（原加速档=" + VanillaAccelScale().ToString("0.###")
-						+ " × " + factor.ToString("0.##") + "）");
+						+ "，当前档位=" + _gear + "）");
 				}
 			}
 		}
@@ -704,19 +861,798 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 			{
 				return;
 			}
-			if (v.ButtonPressed && _on)
+			// 玩家自己动了游戏自带「加速」⇒ 档位跟着它走（游戏自己已经改过 TimeScale）
+			//   · 被勾上 ⇒ 档位 1（游戏加速）
+			//   · 被取消 ⇒ 档位 0（正常速度）
+			bool vp = v.ButtonPressed;
+			if (vp && _gear != 1)
 			{
-				// 玩家点了原加速 ⇒ 取消我方（不调 ApplyTimeScale，让游戏的逻辑自己生效）
-				_suppress = true;
+				_gear = 1;
 				_on = false;
+				SyncCells();
 				if (_box != null && GodotObject.IsInstanceValid(_box))
 				{
+					_suppress = true;
 					_box.ButtonPressed = false;
 				}
-				Info("检测到「加速」被勾选 ⇒ 自动取消" + BoxText + "（互斥）。");
+				Info("检测到「加速」被勾选 ⇒ 档位切到 1（游戏加速）。");
+			}
+			else if (!vp && _gear == 1)
+			{
+				_gear = 0;
+				SyncCells();
+				Info("检测到「加速」被取消 ⇒ 档位切到 0（正常速度）。");
 			}
 		}
 		catch { }
+		finally { _suppress = false; }
+	}
+
+	// ================================================================ 三档选择器（样式 1/2/3）
+
+	/// <summary>收起三档选择器（切到样式 4 或离开战斗时）。</summary>
+	private void HideSelector()
+	{
+		try
+		{
+			if (_sel != null && GodotObject.IsInstanceValid(_sel))
+			{
+				_sel.Visible = false;
+			}
+		}
+		catch { }
+	}
+
+	/// <summary>
+	/// 找游戏自带「菜单」按钮（`GUITop/ButtonPause`，与 `CheckBox2X` 是**同一个父节点**的兄弟）。
+	///
+	/// 名字取自 `Scene/TowerDefesne/TowerDefenseNew/TowerDefenseControlNew.tscn`：
+	///     [node name="ButtonPause" parent="GUITop" instance=ExtResource("6_luhhn")]
+	/// 用户要求把自建控件**右对齐到这个按钮**（比对齐「加速」更贴右侧留白）。
+	/// 拿不到就返回 null ⇒ 调用处退回"对齐加速复选框"的老行为。
+	/// </summary>
+	private Control FindPauseButton(CheckBox vanilla)
+	{
+		try
+		{
+			Node p = vanilla.GetParent();
+			if (p == null || !GodotObject.IsInstanceValid(p))
+			{
+				return null;
+			}
+			Node n = FindNodeByName(p, "ButtonPause");
+			if (n is Control c && GodotObject.IsInstanceValid(c))
+			{
+				return c;
+			}
+		}
+		catch { }
+		return null;
+	}
+
+	/// <summary>把游戏自带复选框还原成"我们动它之前"的可见性。</summary>
+	private void RestoreVanillaVisibility(CheckBox vanilla)
+	{
+		try
+		{
+			if (!_hidVanilla || vanilla == null || !GodotObject.IsInstanceValid(vanilla))
+			{
+				return;
+			}
+			vanilla.Visible = _vanillaPrevVisible;
+			_hidVanilla = false;
+		}
+		catch { }
+	}
+
+	/// <summary>
+	/// 本关是否**已经正式开始**（`TowerDefenseManager.Instance.IsGameRunning()`）。
+	/// 选卡 / 关卡预览阶段是 false ⇒ 那时不显示自建控件（用户要求）。
+	/// ⚠️ 反射拿不到时返回 **true** —— 宁可显示，也不要因为反射失败把功能整个关掉。
+	/// </summary>
+	private bool IsGameRunning()
+	{
+		try
+		{
+			object mgr = GetSingleton("TowerDefenseManager");
+			if (mgr == null)
+			{
+				return true;
+			}
+			MethodInfo m = mgr.GetType().GetMethod("IsGameRunning",
+				BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+			if (m != null && m.ReturnType == typeof(bool) && m.GetParameters().Length == 0)
+			{
+				object r = m.Invoke(mgr, null);
+				return !(r is bool b) || b;
+			}
+		}
+		catch { }
+		return true;
+	}
+
+	/// <summary>收起原有复选框（切到样式 1/2/3 时）。</summary>
+	private void HideCheckBox()
+	{
+		try
+		{
+			if (_box != null && GodotObject.IsInstanceValid(_box))
+			{
+				_box.Visible = false;
+			}
+		}
+		catch { }
+	}
+
+	/// <summary>创建（或找回）自建三档选择器。父节点与「加速」相同，保证同一套主题/变换。</summary>
+	private void EnsureSelector(CheckBox vanilla)
+	{
+		try
+		{
+			if (_sel != null && GodotObject.IsInstanceValid(_sel))
+			{
+				if (_cells.Count == 0)
+				{
+					CollectCells();
+				}
+				return;
+			}
+			Node parent = vanilla.GetParent();
+			if (parent == null || !GodotObject.IsInstanceValid(parent))
+			{
+				return;
+			}
+			// 场景重建后可能已有一个 ⇒ 先找回，避免叠加
+			Node existing = FindNodeByName(parent, SelName);
+			if (existing is Control found && GodotObject.IsInstanceValid(found))
+			{
+				_sel = found;
+				CollectCells();
+				return;
+			}
+
+			EnsureCellStyles();
+
+			PanelContainer root = new PanelContainer();
+			root.Name = SelName;
+			root.MouseFilter = Control.MouseFilterEnum.Stop;
+			EnsureArt();
+			if (ArtOn && _texArrow[0] != null)
+			{
+				// 外框用**整块底图**：切换档位时整张换（SyncSelector 每帧刷新）
+				_sbFrameArt = MakeArtBox(_texArrow[0]);
+				root.AddThemeStyleboxOverride("panel", _sbFrameArt);
+			}
+			else
+			{
+				// 代码绘制：深色底 —— 格子之间的间距透出它，形成分格线
+				_sbFrameFlat = new StyleBoxFlat();
+				_sbFrameFlat.BgColor = FrameBg;
+				_sbFrameFlat.BorderColor = FrameLine;
+				_sbFrameFlat.SetBorderWidthAll(2);
+				_sbFrameFlat.SetCornerRadiusAll((int)FrameRadius);
+				_sbFrameFlat.ContentMarginLeft = FramePad;
+				_sbFrameFlat.ContentMarginRight = FramePad;
+				_sbFrameFlat.ContentMarginTop = FramePad;
+				_sbFrameFlat.ContentMarginBottom = FramePad;
+				root.AddThemeStyleboxOverride("panel", _sbFrameFlat);
+			}
+
+			_cells.Clear();
+			if (Style == BtnStyle.SingleGear)
+			{
+				// 样式 3：只有一格，显示当前档位的箭头
+				Button one = MakeCellButton(0);
+				one.Name = "Cell0";
+				one.CustomMinimumSize = new Vector2(CellW * 1.45f, CellH);
+				one.Pressed += () => OnCellClicked(0);
+				root.AddChild(one);
+				_cells.Add(one);
+			}
+			else
+			{
+				BoxContainer box;
+				if (Style == BtnStyle.TriVertical)
+				{
+					VBoxContainer v = new VBoxContainer();
+					v.Alignment = BoxContainer.AlignmentMode.Center;
+					box = v;
+				}
+				else
+				{
+					HBoxContainer h = new HBoxContainer();
+					h.Alignment = BoxContainer.AlignmentMode.Center;
+					box = h;
+				}
+				box.AddThemeConstantOverride("separation", (int)CellGap);
+				root.AddChild(box);
+				for (int i = 0; i < 3; i++)
+				{
+					Button b = MakeCellButton(i);
+					b.Name = "Cell" + i;
+					b.CustomMinimumSize = new Vector2(
+						CellW, (Style == BtnStyle.TriVertical) ? CellHVertical : CellH);
+					// 素材模式下让格子铺满内容区 —— 否则按钮只有最小尺寸、点击区落不到素材格子上
+					if (UseArt)
+					{
+						b.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+						b.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+					}
+					int idx = i;
+					b.Pressed += () => OnCellClicked(idx);
+					box.AddChild(b);
+					_cells.Add(b);
+				}
+			}
+
+			root.Visible = false;    // 等 SyncSelector 定好位再显示，避免闪一下
+			parent.AddChild(root);
+			_sel = root;
+			if (!_selBuilt)
+			{
+				_selBuilt = true;
+				Info("已创建加速档位选择器（样式 " + (int)Style + "，格子数=" + _cells.Count + "）。");
+			}
+		}
+		catch (Exception ex)
+		{
+			Warn("创建档位选择器失败：" + ex.Message);
+		}
+	}
+
+	/// <summary>
+	/// 量一段文字在**基准字号**（`CellFontSize`）下的像素宽 —— 用游戏自己的主题字体，所以是准的。
+	///
+	/// ⚠️⚠️ 必须**固定用基准字号**量，**绝不能**用 `GetThemeFontSize()` 取当前字号：
+	///   本方法的结果被用来"决定该格要不要缩小字号"，若拿当前字号量，就会形成
+	///     16 号 → 判定装不下 → 改 12 号 → 下次按 12 号量 → 判定装得下 → 改回 16 号 → …
+	///   的**每帧震荡**（用户实测反馈："不停的抽动"）。
+	///   固定基准字号后，判定结果与"当前字号"无关 ⇒ 一次定下来就不再变。
+	///
+	/// 取不到字体返回 0 ⇒ 调用处退回保守的 `CellW`。
+	/// </summary>
+	private static float CellTextWidth(Button b, string text)
+	{
+		try
+		{
+			if (b == null || !GodotObject.IsInstanceValid(b) || string.IsNullOrEmpty(text))
+			{
+				return 0f;
+			}
+			Font f = b.GetThemeFont("font");
+			if (f != null)
+			{
+				return f.GetStringSize(text, HorizontalAlignment.Left, -1f, CellFontSize).X;
+			}
+		}
+		catch { }
+		return 0f;
+	}
+
+	/// <summary>造一个格子按钮（外观每帧由 ApplyCellStyle 覆盖）。</summary>
+	private static Button MakeCellButton(int i)
+	{
+		Button b = new Button();
+		b.Text = GearArrow[i];
+		b.FocusMode = Control.FocusModeEnum.None;
+		b.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+		b.AddThemeFontSizeOverride("font_size", CellFontSize);
+		b.SetMeta("ds_fs", CellFontSize);
+		// 白字要配黑描边才在绿/橙/红三色底上都清楚（描边色见 ApplyCellStyle 的 font_outline_color）
+		b.AddThemeConstantOverride("outline_size", 3);
+		return b;
+	}
+
+	/// <summary>把选择器里的格子按钮按名字收集回来（场景重建后复用旧节点时用）。</summary>
+	private void CollectCells()
+	{
+		try
+		{
+			_cells.Clear();
+			for (int i = 0; i < 3; i++)
+			{
+				Node n = FindNodeByName(_sel, "Cell" + i);
+				if (n is Button b && GodotObject.IsInstanceValid(b))
+				{
+					int idx = i;
+					if (!b.HasMeta("ds_wired"))
+					{
+						b.SetMeta("ds_wired", true);
+						b.Pressed += () => OnCellClicked(idx);
+					}
+					_cells.Add(b);
+				}
+			}
+		}
+		catch { }
+	}
+
+	/// <summary>素材文件 → 贴图（失败返回 null）。从**包解压根目录**读文件，避开 res:// 映射问题。</summary>
+	private Texture2D LoadArt(string file)
+	{
+		try
+		{
+			string root = (_context == null) ? null : _context.PackageRoot;
+			if (string.IsNullOrEmpty(root))
+			{
+				return null;
+			}
+			string path = System.IO.Path.Combine(root, "Resources", file);
+			if (!System.IO.File.Exists(path))
+			{
+				return null;
+			}
+			Image img = Image.LoadFromFile(path);
+			if (img == null)
+			{
+				return null;
+			}
+			return ImageTexture.CreateFromImage(img);
+		}
+		catch { return null; }
+	}
+
+	/// <summary>一次性把 10 张素材读进来；任何一张缺失就整体退回代码绘制。</summary>
+	private void EnsureArt()
+	{
+		if (_artTried)
+		{
+			return;
+		}
+		_artTried = true;
+		try
+		{
+			if (!UseArt)
+			{
+				return;
+			}
+			// 整块烘焙图：外框 + 三格(或单格) + 箭头都在一张里，每档一张
+			string prefix = (Style == BtnStyle.SingleGear) ? "style3_gear"
+				: ((Style == BtnStyle.TriVertical) ? "style2_gear" : "style1_gear");
+			bool ok = true;
+			for (int i = 0; i < 3; i++)
+			{
+				_texArrow[i] = LoadArt(prefix + (i + 1) + ".png");
+				ok = ok && _texArrow[i] != null;
+			}
+			_artOk = ok;
+			if (ok && _texArrow[0] != null)
+			{
+				_artW = _texArrow[0].GetWidth();
+				_artH = _texArrow[0].GetHeight();
+			}
+			Info(ok ? ("素材已加载（贴图模式，" + _artW.ToString("0") + "x" + _artH.ToString("0") + "）。")
+				: "素材不完整 ⇒ 退回代码绘制。");
+		}
+		catch (Exception ex)
+		{
+			_artOk = false;
+			Warn("加载素材失败（退回代码绘制）：" + ex.Message);
+		}
+	}
+
+	/// <summary>两个复用的 StyleBox（避免每帧 new）。</summary>
+	private void EnsureCellStyles()
+	{
+		try
+		{
+			EnsureArt();
+			if (_sbGear != null && _sbGearDim != null)
+			{
+				return;
+			}
+			if (ArtOn)
+			{
+				// 素材模式：**整块底图**已经画好了外框/格子/箭头 ⇒
+				//   格子按钮只需要"能被点到"，外观必须完全透明，别盖住底图。
+				_sbGear = new StyleBox[3];
+				_sbGearDim = new StyleBox[3];
+				for (int i = 0; i < 3; i++)
+				{
+					_sbGear[i] = new StyleBoxEmpty();
+					_sbGearDim[i] = new StyleBoxEmpty();
+				}
+				return;
+			}
+			_sbGear = new StyleBox[3];
+			_sbGearDim = new StyleBox[3];
+			for (int i = 0; i < 3; i++)
+			{
+				// 注意：数组类型是 StyleBox[]（要能放 StyleBoxTexture），
+				// 所以这里必须用局部变量 BuildStyleBoxFlat 后再赋进去。
+				StyleBoxFlat on = new StyleBoxFlat();
+				on.BgColor = GearBg[i];
+				on.SetBorderWidthAll(0);
+				on.SetCornerRadiusAll(9);
+				on.ContentMarginLeft = 2f;
+				on.ContentMarginRight = 2f;
+				on.ContentMarginTop = 1f;
+				on.ContentMarginBottom = 1f;
+				_sbGear[i] = on;
+
+				StyleBoxFlat off = new StyleBoxFlat();
+				off.BgColor = GearBgDim[i];
+				off.SetBorderWidthAll(0);
+				off.SetCornerRadiusAll(9);
+				off.ContentMarginLeft = 2f;
+				off.ContentMarginRight = 2f;
+				off.ContentMarginTop = 1f;
+				off.ContentMarginBottom = 1f;
+				_sbGearDim[i] = off;
+			}
+		}
+		catch { }
+	}
+
+	/// <summary>把一张 3 倍九宫贴图包成 StyleBoxTexture。</summary>
+	private static StyleBoxTexture MakeArtBox(Texture2D tex)
+	{
+		StyleBoxTexture sb = new StyleBoxTexture();
+		sb.Texture = tex;
+		// ★ 素材是 **1× 图**（110x36 / 105x36），所以九宫边距也必须按 1× 给：
+		//   左右 18（= 胶囊半径 18px），上下 0。
+		//   ⚠️ 踩过的坑：边距是**纹理像素**、不随缩放变。之前素材是 3 倍图、边距写 54，
+		//      结果 110px 宽的控件被两端吃掉 54+54=108，中间那格只剩 2px ⇒ 显示成绿|红两段。
+		sb.TextureMarginLeft = 18;
+		sb.TextureMarginRight = 18;
+		sb.TextureMarginTop = 0;
+		sb.TextureMarginBottom = 0;
+		sb.ContentMarginLeft = 0f;
+		sb.ContentMarginRight = 0f;
+		sb.ContentMarginTop = 0f;
+		sb.ContentMarginBottom = 0f;
+		return sb;
+	}
+
+	/// <summary>给一个格子上色（选中 = 红底白字，未选中 = 橙底近黑字）。</summary>
+	private void ApplyCellStyle(Button b, bool on, int gear)
+	{
+		try
+		{
+			EnsureCellStyles();
+			if (gear < 0) { gear = 0; }
+			if (gear > 2) { gear = 2; }
+			StyleBox sb = on ? _sbGear[gear] : _sbGearDim[gear];
+			b.AddThemeStyleboxOverride("normal", sb);
+			b.AddThemeStyleboxOverride("hover", sb);
+			b.AddThemeStyleboxOverride("pressed", sb);
+			b.AddThemeColorOverride("font_color", CellFg);
+			b.AddThemeColorOverride("font_hover_color", CellFg);
+			b.AddThemeColorOverride("font_pressed_color", CellFg);
+			b.AddThemeColorOverride("font_focus_color", CellFg);
+			b.AddThemeColorOverride("font_outline_color", CellFgOutline);
+		}
+		catch { }
+	}
+
+	/// <summary>只刷新格子外观/文字（不重新定位）。</summary>
+	private void SyncCells()
+	{
+		try
+		{
+			bool single = (_cells.Count == 1);
+			for (int i = 0; i < _cells.Count; i++)
+			{
+				Button b = _cells[i];
+				if (b == null || !GodotObject.IsInstanceValid(b))
+				{
+					continue;
+				}
+				// 单格样式：这一格永远代表**当前档**；三格样式：第 i 格代表第 i 档
+				int gear = single ? _gear : i;
+				bool lit = single || (i == _gear);
+
+				if (ArtOn)
+				{
+					// 素材模式：箭头已烘焙进底图 ⇒ 按钮上不要任何文字/图标
+					if (!string.IsNullOrEmpty(b.Text))
+					{
+						b.Text = "";
+					}
+					if (b.Icon != null)
+					{
+						b.Icon = null;
+					}
+				}
+				else
+				{
+					// 代码绘制：文字箭头
+					if (b.Icon != null)
+					{
+						b.Icon = null;
+					}
+					string want = GearArrow[gear];
+					if (b.Text != want)
+					{
+						b.Text = want;
+					}
+				}
+				ApplyCellStyle(b, lit, gear);
+			}
+		}
+		catch { }
+	}
+
+	/// <summary>
+	/// 每帧把选择器摆到「加速」原来的位置（右对齐、顶边对齐），并刷新配色。
+	/// 样式 1/2/3 下会**隐藏游戏自带复选框** —— 三档里已含"原版加速"，两套并存会重复。
+	/// </summary>
+	private void SyncSelector(CheckBox vanilla)
+	{
+		try
+		{
+			Control sel = _sel;
+			if (sel == null || !GodotObject.IsInstanceValid(sel))
+			{
+				return;
+			}
+			// 记下"我们动手之前"它是不是可见的，未开始时好还原
+			if (!_hidVanilla)
+			{
+				_vanillaPrevVisible = vanilla.Visible;
+				_hidVanilla = true;
+			}
+			if (vanilla.Visible)
+			{
+				vanilla.Visible = false;
+			}
+			if (!sel.Visible)
+			{
+				sel.Visible = true;
+			}
+			if (_cells.Count == 0)
+			{
+				CollectCells();
+			}
+			SyncCells();
+
+			// ★ 素材模式：底图按**当前档位**整张换（3 张预烘焙图）
+			if (ArtOn && _sbFrameArt != null && _texArrow[_gear] != null
+				&& _sbFrameArt.Texture != _texArrow[_gear])
+			{
+				_sbFrameArt.Texture = _texArrow[_gear];
+			}
+
+			// ★★ 先找「菜单」按钮（`GUITop/ButtonPause`）—— 它同时决定两件事：
+			//     ① 定位：整个控件**右对齐**它的右边缘；
+			//     ② 尺寸：单格样式（样式 3）要**与它等长**。
+			//   时停也是锚在同一个右边缘、同样从菜单下方起算 ⇒ 两者天然等长。
+			Control pauseBtn = FindPauseButton(vanilla);
+			float pauseW = 0f;        // 菜单按钮的**视觉**宽度（含 scale）
+			float pauseRightX = 0f;   // 菜单按钮的**视觉**右边缘
+			if (pauseBtn != null && GodotObject.IsInstanceValid(pauseBtn) && pauseBtn.Visible)
+			{
+				float psx = 1f;
+				try { psx = pauseBtn.Scale.X; } catch { }
+				if (psx <= 0.01f) { psx = 1f; }
+				pauseW = pauseBtn.Size.X * psx;
+				pauseRightX = pauseBtn.GlobalPosition.X + pauseW;
+			}
+
+			// ★★ 用户要求（2026-10-09，二次更正）：**三格等宽，宽度按"一二档字符"来定**。
+			//   即取 `->` / `->>` 里较宽的那个作为统一宽度（不是把一二档撑到 `->>>` 那么宽）。
+			//   第三档 `->>>` 字符多一个 ⇒ **自动缩小它的字号**到刚好装进这个宽度，
+			//   这样既不裁切、也不会把整个控件撑宽。
+			float cellMax = CellW;
+			float t1 = 0f, t2 = 0f;
+			if (_cells.Count >= 2)
+			{
+				t1 = CellTextWidth(_cells[0], GearArrow[0]) + CellMarginX;
+				t2 = CellTextWidth(_cells[1], GearArrow[1]) + CellMarginX;
+				if (t1 > cellMax) { cellMax = t1; }
+				if (t2 > cellMax) { cellMax = t2; }
+			}
+			// ★ 素材模式：格子尺寸用素材的基准值（箭头是图形，不再由文字宽度决定）；
+			//   同时**不再需要缩字号**（下面那段会自动跳过）。
+			if (ArtOn)
+			{
+				// 素材是固定尺寸的整块图（样式1 110x36 / 样式2 105x110 / 样式3 105x36）
+				// ⇒ 格子尺寸按素材里实际划分反推，这样点击区正好落在格子上。
+				//   外框黑边 4、格间距 = CellGap。
+				float iw = _artW - 8f, ih = _artH - 8f;
+				if (Style == BtnStyle.TriVertical)
+				{
+					cellMax = iw;
+					cellMaxH = (ih - 2f * CellGap) / 3f;
+				}
+				else if (Style == BtnStyle.SingleGear)
+				{
+					cellMax = iw;
+					cellMaxH = ih;
+				}
+				else
+				{
+					cellMax = (iw - 2f * CellGap) / 3f;
+					cellMaxH = ih;
+				}
+			}
+			// ★★ 单格样式（样式 3）：**与「菜单」/「时停」等长** —— 直接取菜单按钮的视觉宽，
+			//   再减掉外框的内边距(2×2)与描边(2×2)，剩下的就是格子该有的宽度。
+			//   （单格里最多只有 4 个字符 `->>>`，远窄于菜单按钮 ⇒ 不会触发缩字号。）
+			if (Style == BtnStyle.SingleGear && pauseW > 8f)
+			{
+				float inner = pauseW - (FramePad * 2f + 4f);
+				if (inner > cellMax)
+				{
+					cellMax = inner;
+				}
+			}
+			if (!_widthReported)
+			{
+				_widthReported = true;
+				Diag("格子宽度：-> = " + t1.ToString("0.#")
+					+ "px，->> = " + t2.ToString("0.#")
+					+ "px；菜单按钮宽 = " + pauseW.ToString("0.#")
+					+ "px ⇒ 统一宽 = " + cellMax.ToString("0.#") + "px");
+			}
+			// 竖排时格子给高一点（素材模式统一用素材基准高）
+			float cellH = ArtOn ? cellMaxH
+				: ((Style == BtnStyle.TriVertical) ? CellHVertical : CellH);
+			for (int ci = 0; ci < _cells.Count; ci++)
+			{
+				Button cb2 = _cells[ci];
+				if (cb2 == null || !GodotObject.IsInstanceValid(cb2))
+				{
+					continue;
+				}
+				cb2.CustomMinimumSize = new Vector2(cellMax, cellH);
+
+				// 文字装不下就把这格的字号按比例缩小（只影响装不下的那格）
+				// 素材模式箭头是图形、没有文字 ⇒ 整段跳过
+				if (ArtOn)
+				{
+					continue;
+				}
+				float need = CellTextWidth(cb2, cb2.Text) + CellMarginX;
+				int fsWant = CellFontSize;
+				if (need > cellMax && need > 0.1f)
+				{
+					fsWant = (int)Mathf.Floor(CellFontSize * (cellMax / need));
+					if (fsWant < 9) { fsWant = 9; }
+				}
+				if (cb2.HasMeta("ds_fs") && cb2.GetMeta("ds_fs").AsInt32() == fsWant)
+				{
+					continue;
+				}
+				cb2.SetMeta("ds_fs", fsWant);
+				cb2.AddThemeFontSizeOverride("font_size", fsWant);
+			}
+
+			// 尺寸自己算（不依赖容器的延迟布局）：格子 + 间距 + 内边距 + 2px 边框 ×2
+			// ★ 竖排（样式 2）与横排的"宽高"是**对调**的 —— 原来一律按三列宽算，
+			//   竖排时会撑成一个很宽的大方块（本次修掉）。
+			float bw, bh;
+			if (Style == BtnStyle.SingleGear)
+			{
+				bw = cellMax;   // ★ 单格占满控件内部宽度（cellMax 已按菜单按钮宽算好）
+				bh = cellH;
+			}
+			else if (Style == BtnStyle.TriVertical)
+			{
+				bw = cellMax;                            // 一列
+				bh = 3f * cellH + 2f * CellGap;          // 三行
+			}
+			else
+			{
+				bw = 3f * cellMax + 2f * CellGap;        // 三列
+				bh = cellH;                              // 一行
+			}
+			Vector2 want = new Vector2(bw + FramePad * 2f + 4f, bh + FramePad * 2f + 4f);
+			// ★ 素材模式：控件尺寸**直接取素材的 1× 尺寸** ⇒ 1:1 绘制、不变形
+			//   （素材本身就是按这个尺寸设计的，横竖样式各自一套）
+			if (ArtOn && _artW > 8f && _artH > 8f)
+			{
+				want = new Vector2(_artW, _artH);
+			}
+
+			float vScaleX = 1f;
+			try
+			{
+				vScaleX = vanilla.Scale.X;
+			}
+			catch { }
+			if (vScaleX <= 0.01f) { vScaleX = 1f; }
+
+			Vector2 vSize = vanilla.Size;
+			Vector2 vGlobal = vanilla.GlobalPosition;
+			float vRightX = vGlobal.X + vSize.X * vScaleX;
+
+			// 右边缘：★ 用户要求 —— **右对齐到「菜单」按钮**（拿不到才退回对齐「加速」）
+			//   菜单按钮的视觉右边缘已在前面算好（`pauseRightX`）。
+			float rightX = (pauseRightX > 0.5f) ? pauseRightX : vRightX;
+			float myLeftG = rightX - want.X;
+			float myTopG = vGlobal.Y;
+
+			sel.CustomMinimumSize = want;
+			sel.Size = want;
+			sel.GlobalPosition = new Vector2(myLeftG, myTopG);
+
+			if (!_selBuilt)
+			{
+				_selBuilt = true;
+				Diag("选择器布局：gpos=(" + myLeftG.ToString("0.#") + "," + myTopG.ToString("0.#")
+					+ ") size=(" + want.X.ToString("0.#") + "," + want.Y.ToString("0.#")
+					+ ") 样式=" + (int)Style);
+			}
+		}
+		catch { }
+	}
+
+	/// <summary>点了一个格子。</summary>
+	private void OnCellClicked(int idx)
+	{
+		try
+		{
+			// 样式 3 只有一格 ⇒ 单击循环；样式 1/2 三格各对应一档 ⇒ 点哪档跳哪档
+			int g = (Style == BtnStyle.SingleGear) ? ((_gear + 1) % 3) : idx;
+			// ★ 用户要求：点**已经选中的那一档**时什么都不做 ——
+			//   尤其是**不要再放一次音效**（原来会重复触发，听起来像"点了有效果"）。
+			if (g == _gear)
+			{
+				return;
+			}
+			ApplyGear(g);
+		}
+		catch (Exception ex)
+		{
+			Warn("切档异常：" + ex.Message);
+		}
+	}
+
+	/// <summary>
+	/// 切到指定档位（三档模型的**唯一入口**）：
+	///   0 = 正常速度（`baseTimeScale`）
+	///   1 = 游戏加速（`baseTimeScale × 1.5`，QUIZ 关 ×3）
+	///   2 = 本 Mod 加速（在游戏加速档上再 ×`DoubleFactor`）
+	/// </summary>
+	private void ApplyGear(int g)
+	{
+		try
+		{
+			if (g < 0) { g = 0; }
+			if (g > 2) { g = 2; }
+			// 已经是这一档 ⇒ 不重复施加、不放音效（与 OnCellClicked 的早退双保险）
+			if (g == _gear && _gearInit)
+			{
+				return;
+			}
+			_gear = g;
+			_gearInit = true;
+			_on = (g == 2);
+
+			double baseTs = BaseTimeScale();
+			double mult = IsQuizLevel() ? 3.0 : 1.5;
+			switch (g)
+			{
+				case 1:
+					SetVanillaPressed(true);
+					SetTimeScaleRaw(baseTs * mult);
+					PlaySound("2XSpeedOn");
+					break;
+				case 2:
+					SetVanillaPressed(false);
+					SetTimeScaleRaw(baseTs * mult * DoubleFactor);
+					PlaySound("2XSpeedOn");
+					break;
+				default:
+					SetVanillaPressed(false);
+					SetTimeScaleRaw(baseTs);
+					PlaySound("2XSpeedDown");
+					break;
+			}
+			// 复选框（样式 4）与选择器（样式 1/2/3）都要跟上
+			if (_box != null && GodotObject.IsInstanceValid(_box) && _box.ButtonPressed != _on)
+			{
+				_suppress = true;
+				_box.ButtonPressed = _on;
+			}
+			SyncCells();
+			Info("档位 → " + g + "（" + GearName[g] + "）：TimeScale=" + CurrentTimeScaleText());
+		}
+		catch (Exception ex)
+		{
+			Warn("切档失败：" + ex.Message);
+		}
 		finally { _suppress = false; }
 	}
 

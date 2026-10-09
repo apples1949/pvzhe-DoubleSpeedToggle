@@ -1,0 +1,4 @@
+<!-- 三倍图：最终显示 32x28。绿亮态 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="84" viewBox="0 0 96 84">
+  <rect x="0" y="0" width="96" height="84" rx="27" ry="27" fill="#2EB842"/>
+</svg>

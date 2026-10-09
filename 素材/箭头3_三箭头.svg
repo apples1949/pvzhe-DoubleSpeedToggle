@@ -1,0 +1,12 @@
+<!-- 三倍图：最终显示 32x28（叠在单格上）。箭头为纯图形，可任意缩放不糊 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="84" viewBox="0 0 96 84">
+
+  <!-- ->>>  三箭头 -->
+  <rect x="8" y="37" width="16" height="10" fill="#111111"/>
+  <path d="M 26 22 L 44 42 L 26 62" fill="none" stroke="#111111" stroke-width="10"
+        stroke-linejoin="miter" stroke-linecap="butt"/>
+  <path d="M 42 22 L 60 42 L 42 62" fill="none" stroke="#111111" stroke-width="10"
+        stroke-linejoin="miter" stroke-linecap="butt"/>
+  <path d="M 58 22 L 76 42 L 58 62" fill="none" stroke="#111111" stroke-width="10"
+        stroke-linejoin="miter" stroke-linecap="butt"/>
+</svg>

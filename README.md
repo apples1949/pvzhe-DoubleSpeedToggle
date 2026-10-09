@@ -134,3 +134,26 @@ python mods\DoubleSpeedToggle\build_and_install.py --install
 ```
 
 改代码后**普通重启游戏**即可（`build_and_install.py` 会清 `ModsCache/DoubleSpeedToggle`）。
+
+---
+
+## 四种按钮样式（预览图）
+
+![四样式总览](预览-四样式.png)
+
+源码顶部一个常量切换（改完重新构建）：
+
+`csharp
+private const BtnStyle Style = BtnStyle.TriHorizontal;
+//   1 = TriHorizontal  三格横排  110x36   未选中橙 / 选中红   ← 当前默认
+//   2 = TriVertical    三档竖排  105x110  未选中绿 / 选中红
+//   3 = SingleGear     单格循环  105x36   档位色 绿/橙/红
+//   4 = CheckBox       原有复选框（与本 Mod 复选框间距 6px → 2px）
+`
+
+样式 1/2/3 使用 Resources/ 下的 **9 张手绘素材**（style{1,2,3}_gear{1,2,3}.png，按 1× 出图，
+整块烘焙：外框 + 格子 + 箭头都在一张图里，代码用 StyleBoxTexture 九宫拉伸，格子按钮透明只负责点击）；
+**素材缺失时自动退回纯代码绘制**（StyleBoxFlat + 文字箭头），不会空白。
+
+> 预览图里的每一列竖排展示的是**同一控件的不同档位状态**；实机中同一时刻只显示一个（当前档高亮）。
+> 控件的右边缘与游戏「菜单」按钮对齐；「时停」会自动排到它下方。
