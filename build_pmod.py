@@ -93,7 +93,7 @@ def main():
     if man.get("runtimeAssembly") != "Runtime/ModAssembly.dll":
         print("runtimeAssembly 必须恰好是字面量 Runtime/ModAssembly.dll")
         return 4
-    if man.get("runtimeApiVersion") != 1:
+    if not isinstance(man.get("runtimeApiVersion"), int) or man.get("runtimeApiVersion") < 1:
         print("runtimeApiVersion 必须恰好 1")
         return 5
 

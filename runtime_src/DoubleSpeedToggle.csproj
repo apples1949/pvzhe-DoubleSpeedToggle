@@ -35,6 +35,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\KeybindPanelManager.cs" Link="KeybindPanelManager.cs" />
+    <Compile Include="..\..\QrCodeBitmap.cs" Link="QrCodeBitmap.cs" />
+    <Compile Include="..\..\SponsorQrInjector.cs" Link="SponsorQrInjector.cs" />
+    <Compile Include="..\..\BattleOptionColumns.cs" Link="BattleOptionColumns.cs" />
+    <Compile Include="..\..\PosEditorRow.cs" Link="PosEditorRow.cs" />
     <Compile Remove="check_*.cs" />
     <None Include="check_*.cs" />
   </ItemGroup>

@@ -47,12 +47,16 @@
 // ============================================================================
 
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Godot;
 using PVZHE.ModEditor.ModSystem;
 
 public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 {
+	// 赞助码注入器（SponsorQrInjector.cs 共享组件）用的包根缓存
+	internal static string SponsorQrRoot = null;
+
 	private const string LogPrefix = "[DoubleSpeedToggle] ";
 	private const string NewBoxName = "ModDoubleSpeedToggle";
 
@@ -84,7 +88,7 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	///   本项目踩过：脚本批量替换时把方法体自己也换了 ⇒ 无限递归 ⇒
 	///   `StackOverflowException`（catch 抓不住，直接终止线程）。
 	/// </summary>
-	private static readonly bool EnableDiagLog = false;
+	private static bool EnableDiagLog;   // 由 Initialize 从「Mod 配置」读取（原为编译期常量）
 
 	// ================================================================ 按钮样式（内部开关）
 
@@ -106,7 +110,18 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 		CheckBox = 4,
 	}
 
-	private const BtnStyle Style = BtnStyle.TriHorizontal;   // 当前 = 样式 1（三格横排）
+	/// <summary>
+	/// ★ 当前样式 —— 由「Mod 配置」面板决定（applyMode: restart ⇒ 重启游戏后生效）。
+	/// 因为切换样式要重建整套控件与素材，用面板的 restart 模式最稳。
+	/// </summary>
+	private static BtnStyle Style = BtnStyle.TriHorizontal;
+		private const string KPositionMode = "positionMode";
+		private const string KCustomX = "customX";
+		private const string KCustomY = "customY";
+		private static bool _posCustom;
+		private static int _posX = 10;
+		private static int _posY = 200;
+	private const string KStyle = "style";
 
 	// ★ 点击方式（2026-10-09 用户定稿）：**不再提供开关**。
 	//   样式 1/2 是三格各对应一档 ⇒ **点哪档就跳哪档**（直接选中）；
@@ -214,8 +229,54 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 
 	/// <summary>当前档位：0 = 正常速度，1 = 游戏加速，2 = 本 Mod 加速。</summary>
 	private int _gear;
+
+	/// <summary>切换档位的快捷键（配置面板可改，默认 V）。</summary>
+	private const string KHotkeyNext = "hotkeyNext";
+	private const string KShowVanilla = "showVanillaCheckBox";
+	private Callable _hotkeyTick;
+	private bool _hotkeyPrev;
+	private bool _hotkeyConnected;
+	/// <summary>上一帧是否处于"战斗运行中"（v1.4.6：过关/离开后重置档位的下降沿检测）。</summary>
+	private bool _wasRunning;
 	/// <summary>档位是否已经真正设过一次 —— 用来区分初始的 0 和用户点了档位 0。</summary>
 	private bool _gearInit;
+
+	/// <summary>配置页样式演示图注入（懒加载一次）。</summary>
+	private bool _styleDemoInjected;
+
+	/// <summary>配置变化订阅标志（v1.4.3 热更新样式）。</summary>
+	private bool _settingsSubscribed;
+
+	/// <summary>
+	/// ★ v1.4.3：配置变化热处理 —— style 改动 ⇒ 拆旧选择器/复选框，下一帧按新样式重建（免重启）。
+	/// </summary>
+	private void OnSettingsChangedHot(IReadOnlyList<string> keys)
+	{
+		try
+		{
+			if (keys == null) { return; }
+			bool styleChanged = false;
+			foreach (string k in keys)
+			{
+				if (k == "style") { styleChanged = true; break; }
+			}
+			if (styleChanged)
+			{
+				ApplyStyleSetting();          // 重读 Style
+				_selBuilt = false;            // 下一帧重建选择器
+				HideSelector();
+				// ★ v1.4.4 修复：必须**连旧选择器一起拆**——只拆 _box 的话 _sel 还活着，
+				//   EnsureSelector 判 _sel 有效直接早退 ⇒ 永远不按新样式重建（用户实测无效的根因）。
+				if (_sel != null && GodotObject.IsInstanceValid(_sel)) { _sel.QueueFree(); }
+				_sel = null;
+				_cells.Clear();
+				if (_box != null && GodotObject.IsInstanceValid(_box)) { _box.QueueFree(); _box = null; }
+				// 游戏原生框显隐交由下一帧 OnProcessFrame 按新样式+开关决定
+				Diag("样式已热更新：" + Style);
+			}
+		}
+		catch (Exception ex) { Warn("样式热更新失败：" + ex.Message); }
+	}
 
 	/// <summary>选择器创建日志只报一次。</summary>
 	private bool _selBuilt;
@@ -252,7 +313,11 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	/// <summary>素材是否可用（UseArt 且 11 张图都读到了）。</summary>
 	private bool ArtOn
 	{
-		get { return UseArt && _artOk; }
+		// ★★ 2026-10-13（用户实测"改样式没效果、整半天"）：
+		//   素材（11 张箭头底图）是**按"三格横排"这一个样式画的**，格子朝向/尺寸全由它决定 ⇒
+		//   素材模式下无论选哪种样式，画出来都是同一套图（代码绘制的竖排/单格分支根本不执行）✗。
+		//   所以**只在默认样式（三格横排）下用素材**；选其它样式时强制走代码绘制 ⇒ 样式才真的看得出来。
+		get { return UseArt && _artOk; }   // ★ 撤回上一轮的"仅三格横排用素材"：用户指出素材本就是通用的
 	}
 
 	/// <summary>
@@ -266,8 +331,74 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 
 	// ================================================================ 入口三回调
 
-	public void Initialize(XWModRuntimeContext context)
+	
+	// ============================================================ 配置面板接线
+	//
+	// mod.json 里声明了 enableLog（bool，默认 false）。
+	// 这里在 Initialize 读一次 —— 老宿主没有 context.Settings 时吞异常、按 false 处理。
+	// 用 Get<object> 而不是 Get<bool>：宿主把值存成 Dictionary<string, object>，
+	// 直接 Get<bool> 可能抛 InvalidCastException。
+
+	private static bool ReadLogSetting(XWModRuntimeContext context)
 	{
+		try
+		{
+			if (context == null)
+			{
+				return false;
+			}
+			object v = context.Settings.Get<object>("enableLog");
+			if (v is bool b)
+			{
+				return b;
+			}
+			if (v is string s && bool.TryParse(s, out bool sb))
+			{
+				return sb;
+			}
+			if (v is System.Text.Json.JsonElement je)
+			{
+				if (je.ValueKind == System.Text.Json.JsonValueKind.True) { return true; }
+				if (je.ValueKind == System.Text.Json.JsonValueKind.False) { return false; }
+			}
+			return false;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	/// <summary>读 bool 配置（v1.4：showVanillaCheckBox 等新开关）。</summary>
+	private bool ReadBoolSetting(string key, bool fallback)
+	{
+		try
+		{
+			if (_context == null) { return fallback; }
+			object v = _context.Settings.Get<object>(key);
+			if (v is bool b) { return b; }
+			if (v is string s && bool.TryParse(s, out bool sb)) { return sb; }
+			if (v is System.Text.Json.JsonElement je)
+			{
+				if (je.ValueKind == System.Text.Json.JsonValueKind.True) { return true; }
+				if (je.ValueKind == System.Text.Json.JsonValueKind.False) { return false; }
+			}
+			return fallback;
+		}
+		catch { return fallback; }
+	}
+
+	private static readonly System.Collections.Generic.HashSet<string> _oneShotWarns
+		= new System.Collections.Generic.HashSet<string>();
+
+public void Initialize(XWModRuntimeContext context)
+	{
+			try { SponsorQrRoot = context.PackageRoot; } catch { }
+			ApplyStyleSetting();   // 面板里的样式（restart 模式 ⇒ 下次启动生效）
+			ApplyPositionSetting();   // 位置设置（immediate）
+
+			EnableDiagLog = false;   // ★ 2026-10-14 用户要求：默认关闭所有日志（原：EnableDiagLog = ReadLogSetting(context)）
+
 		try
 		{
 			_context = context;
@@ -300,6 +431,18 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 			//     （只有 `Action → Callable` 这一个方向有隐式转换）。
 			_tick = Callable.From(new Action(OnProcessFrame));
 			_tree.Connect("process_frame", _tick);
+			// 快捷键：独立一条 process_frame 连接，不干扰主循环
+			try
+			{
+				if (!_hotkeyConnected)
+				{
+					_hotkeyTick = Callable.From(new Action(OnHotkeyTick));
+					_tree.Connect("process_frame", _hotkeyTick);
+					_hotkeyConnected = true;
+					Info("档位快捷键已挂载：" + ReadHotkey());
+				}
+			}
+			catch { }
 			_connected = true;
 			Info("已挂接 SceneTree.ProcessFrame。");
 		}
@@ -330,15 +473,124 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 
 	// ================================================================ 每帧
 
+	/// <summary>★ v1.4.6：每帧样式对齐检查——settings 的 style 与 Style 枚举不一致 ⇒ 热重建。</summary>
+	private void CheckStyleSync()
+	{
+		try
+		{
+			// ★ 性能：本方法是"宿主 Changed 事件可能没触发"的**兜底**（正式的订阅在 OnProcessFrame 里，
+			//   `Settings.Changed += OnSettingsChangedHot`）⇒ 不必每帧轮询，15 帧足够。
+			//   顺带每帧的 `Get<object>` 装箱 + `JsonElement.ToString()` 字符串分配也降到 1/15。
+			ulong _csF = Engine.GetProcessFrames();
+			if (_csF - _styleSyncFrame < 15UL) { return; }
+			_styleSyncFrame = _csF;
+			if (_context?.Settings == null) { return; }
+			object v = _context.Settings.Get<object>("style");
+			string s = null;
+			if (v is string str) { s = str; }
+			else if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.String) { s = je.GetString(); }
+			else if (v is System.Text.Json.JsonElement jn) { s = jn.ToString(); }
+			if (string.IsNullOrWhiteSpace(s)) { return; }
+			s = s.Trim();
+			BtnStyle want = Style;
+			if (s == "1" || s.Equals("tri", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.TriHorizontal; }
+			else if (s == "2" || s.Equals("vert", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.TriVertical; }
+			else if (s == "3" || s.Equals("single", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.SingleGear; }
+			else if (s == "4" || s.Equals("checkbox", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.CheckBox; }
+			if (want != Style)
+			{
+				Style = want;
+				_selBuilt = false;
+				HideSelector();
+				if (_sel != null && GodotObject.IsInstanceValid(_sel)) { _sel.QueueFree(); }
+				_sel = null;
+				_cells.Clear();
+				if (_box != null && GodotObject.IsInstanceValid(_box)) { _box.QueueFree(); _box = null; }
+				Diag("样式对齐（每帧检查）：" + Style);
+				// ★ 2026-10-13 诊断：到底卡在哪一步（重建前/后控件的存在情况）
+				try
+				{
+					Diag("样式重建状态：sel=" + ((_sel == null) ? "null" : (_selBuilt ? "built" : "pending"))
+						+ " box=" + ((_box == null) ? "null" : "ok")
+						+ " cells=" + _cells.Count + " inBattle=" + (_tree != null));
+				}
+				catch { }
+			}
+		}
+		catch { }
+	}
+
+
 	private void OnProcessFrame()
 	{
+		try { SponsorQrInjector.Tick(Engine.GetMainLoop() as SceneTree, "三倍加速", SponsorQrRoot, "Resources/SponsorQR.png"); } catch { }
+		// ★ v1.4.6：每帧对齐样式设置（防宿主 Changed 事件丢失/未触发——用户实测热更新无效）
+		try { CheckStyleSync(); } catch { }
+		// ★ 样式重建重试：素材可能晚一两帧才就绪 ⇒ 就绪后再按当前样式重建一次（否则会停在代码绘制）
+		try
+		{
+			if (_styleRebuildRetry > 0)
+			{
+				_styleRebuildRetry--;
+				CheckBox van2 = VanillaBoxCached();
+				try { EnsureArt(); } catch { }
+				if (ArtOn)
+				{
+					if (_sel != null && GodotObject.IsInstanceValid(_sel)) { _sel.QueueFree(); }
+					_sel = null;
+					_selBuilt = false;
+					EnsureSelector(van2);
+					SyncSelector(van2);
+					_styleRebuildRetry = 0;
+					Diag("素材就绪后已按样式重建（ArtOn=" + ArtOn + " 样式=" + (int)Style + "）");
+				}
+			}
+		}
+		catch { }
+		// ★ v1.4.3：订阅配置变化 —— 样式改动后**不用重启**（拆旧控件，下一帧按新样式重建）；
+		//   顺带恢复「录制面板 + 配置页录制按钮」（用户要求回归；无面板呼出键）
+		try
+		{
+			if (_context?.Settings != null && !_settingsSubscribed)
+			{
+				_context.Settings.Changed += OnSettingsChangedHot;
+				_settingsSubscribed = true;
+			}
+		}
+		catch (Exception ex) { Warn("订阅配置失败：" + ex.Message); }
+		try
+		{
+			string cur = ReadHotkey();
+			KeybindPanelManager.Tick(_tree, "三倍加速", "三倍加速", SponsorQrRoot ?? (_context?.PackageRoot ?? ""),
+				KHotkeyNext, ParseKeySettingCached(cur), string.IsNullOrWhiteSpace(cur) ? "（无绑定）" : cur,
+				key => WriteHotkeySetting(key));
+		// 注：面板保存后配置页下拉在重新打开时同步（宿主 UI 无外部刷新 API）
+		}
+		catch (Exception ex) { Warn("键位面板异常：" + ex.Message); }
+		// ★ v1.4：样式演示图注入配置页（懒加载）
+		try { TickStyleDemoImage(); } catch { }
+		// ★ 需求 4+6（2026-10-13）：战斗设置页里的「三倍加速 · 位置」编辑器。
+		//   本 Mod 原本不碰设置页，所以这里用"15 帧一次的轻量守候"：原生 find_child 找
+		//   BattleOption 对话框，找到就交给共享组件建/刷新那一行（幂等、开销可忽略）。
+		try
+		{
+			ulong _peF = Engine.GetProcessFrames();
+			if (_peF - _posEditorFrame >= 15UL)
+			{
+				_posEditorFrame = _peF;
+				Node bo = (_tree != null && GodotObject.IsInstanceValid(_tree) && _tree.Root != null)
+					? _tree.Root.FindChild("BattleOption", true, false) : null;
+				if (bo != null && GodotObject.IsInstanceValid(bo)) { EnsurePosEditor(bo); }
+			}
+		}
+		catch { }
 		try
 		{
 			if (_tree == null || !GodotObject.IsInstanceValid(_tree))
 			{
 				return;
 			}
-			CheckBox vanilla = FindVanillaBox();
+			CheckBox vanilla = VanillaBoxCached();   // ★ 性能：不再每帧整树找
 			if (vanilla == null)
 			{
 				// 不在战斗场景（主菜单、关卡选择…）⇒ 收起自己的按钮
@@ -366,20 +618,56 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 				HideSelector();
 				HideCheckBox();
 				RestoreVanillaVisibility(vanilla);
+				// ★ v1.4.6（用户 2026-10-11）：**过关/失败/离开关卡后档位不重置**的 bug——
+				//   检测「战斗从运行中变为非运行」的下降沿 ⇒ 重置档位为 0（正常速度） +
+				//   还原游戏原生 TimeScale，下次进关从正常速度开始。
+				if (_wasRunning)
+				{
+					_wasRunning = false;
+					if (_gear != 0)
+					{
+						int oldGear = _gear;
+						_gear = 0;
+						_on = false;
+						_gearInit = false;   // 下关首次切档不受"同档早退"影响
+						SetVanillaPressed(false);
+						SetTimeScaleRaw(BaseTimeScale());
+						SyncCells();
+						Diag("战斗结束（离开/过关/失败），档位已从 " + GearName[oldGear] + " 重置为正常速度。");
+					}
+				}
 				return;
+			}
+			_wasRunning = true;
+
+			// ★ v1.4：「显示游戏自带加速复选框」开关（默认关 = 隐藏；开 = 保留原生框可见）。
+			//   样式 4 下本开关不生效（那种样式本来就以原生框为主）。
+			bool showVanilla = ReadBoolSetting(KShowVanilla, false);
+			if (Style != BtnStyle.CheckBox && !showVanilla && vanilla.Visible)
+			{
+				vanilla.Visible = false;
+				try { _hidVanilla = true; } catch { }   // ★ 记录"是我们隐藏的"，切回样式 4 时才能正确还原
 			}
 
 			if (Style == BtnStyle.CheckBox)
 			{
 				// 样式 4：原有复选框（且已把与「加速」的间距拉短）
+				// ★★ 2026-10-13（用户实测截图：选"4 · 原有复选框"时控件是空的）：
+				//   之前从样式 1/2/3 切到 4 时，**只隐藏、不还原**游戏原版复选框
+				//   （还原只发生在退出/关 Mod 时，见 RestoreVanillaVisibility）⇒ 样式 4 只剩一个空壳 ✗。
+				//   这里在进入样式 4 前先把原版复选框**放回来**。
+				try { RestoreVanillaVisibility(vanilla); } catch { }
+				if (vanilla != null && GodotObject.IsInstanceValid(vanilla) && !vanilla.Visible)
+				{
+					vanilla.Visible = true;   // 兜底：即便标记位不一致也让它可见（样式 4 就是用它）
+				}
 				HideSelector();
 				EnsureBox(vanilla);
 				SyncBox(vanilla);
 			}
 			else
 			{
-				// 样式 1/2/3：自建三档选择器；隐藏游戏自带复选框（三档里已含"原版加速"）
-				HideCheckBox();
+				// 样式 1/2/3：自建三档选择器（默认隐藏原生复选框，见上方开关）
 				EnsureSelector(vanilla);
 				SyncSelector(vanilla);
 			}
@@ -391,6 +679,59 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 		}
 	}
 
+	// ================================================================ 样式演示图（配置页关于栏内嵌）
+
+	private Texture2D _styleDemoTex;
+
+	/// <summary>
+	/// ★ v1.4：把四档样式演示图注入**本 Mod 配置页**的「样式演示图」富文本。
+	/// 锚 = RichTextLabel（名字 Content_aboutStyleImages，宿主按 "Content_"+key 命名），
+	/// 归属判定：Text 以「样式说明（宿主面板不支持图片」开头的是本 Mod 的（共享注入器同款机制）。
+	/// </summary>
+	private void TickStyleDemoImage()
+	{
+		try
+		{
+			// ★ 性能（2026-10-12 真机探针）：本方法**每帧**被调用，内部是**两次整树递归查找**
+			//   （`_tree.Root` 上找 Content_aboutStyleImages 与 Reset_hotkeyNext）。
+			//   真机采样：本 Mod 回调均 4.44ms/帧、中位 4.31ms。而配置页的出现/消失
+			//   不可能发生在 20 帧内 ⇒ 每 20 帧查一次，行为等价。
+			ulong _sdF = Engine.GetProcessFrames();
+			if (_sdF - _styleDemoFrame < 20UL) { return; }
+			_styleDemoFrame = _sdF;
+			if (_styleDemoInjected) { return; }
+			// ★ 性能：改用引擎原生 find_child（C++ 内搜索），比 C# 逐节点递归快一个数量级
+			Node rich = _tree.Root.FindChild("Content_aboutStyleImages", true, false);
+			if (rich == null || !GodotObject.IsInstanceValid(rich) || rich is not RichTextLabel rtl) { return; }
+			// 归属：本 Mod 的该项以「样式说明（」起头（aboutStyles 的 text）——不对，那是另一项；
+			// 本项（演示图）的文本以「四档按钮样式演示图」前缀判定不可靠（我们 AddImage 前文本是说明文字）。
+			// 稳妥法：本 Mod 配置页的特征 = 同页存在 Reset_hotkeyNext（只有本 Mod 声明它）。
+			if (_tree.Root.FindChild("Reset_hotkeyNext", true, false) == null) { return; }
+
+			if (_styleDemoTex == null || !GodotObject.IsInstanceValid(_styleDemoTex))
+			{
+				string root = SponsorQrRoot ?? (_context?.PackageRoot ?? "");
+				if (string.IsNullOrEmpty(root)) { return; }
+				string p = System.IO.Path.Combine(root, "Resources", "StyleDemo.png");
+				if (!System.IO.File.Exists(p)) { return; }
+				Image img = Image.LoadFromFile(p);
+				if (img == null) { return; }
+				_styleDemoTex = ImageTexture.CreateFromImage(img);
+			}
+			float w = 460f;
+			float h = _styleDemoTex.GetHeight() > 0 ? w * _styleDemoTex.GetHeight() / _styleDemoTex.GetWidth() : w;
+			rtl.AddImage(_styleDemoTex, w, h, null, InlineAlignment.Center);
+			_styleDemoInjected = true;
+			Diag("已在配置页关于栏显示样式演示图。");
+		}
+		catch (Exception ex) { WarnOnceS("styledemo", ex.Message); }
+	}
+
+	private void WarnOnceS(string tag, string msg)
+	{
+		try { if (_oneShotWarns.Add(tag)) { Warn(msg); } } catch { }
+	}
+
 	/// <summary>
 	/// 找游戏自带「加速」复选框。
 	///
@@ -399,6 +740,32 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	/// 但**不写死整条路径** —— 逐级按类名找 `TowerDefenseControl` 节点更稳
 	/// （关卡编辑器等场景可能换皮），拿到后再按 `checkBox2X` 字段名找子节点。
 	/// </summary>
+	// ── ★ 性能（2026-10-12）：原实现**每帧**调 FindVanillaBox() = 每帧一次整树递归 + 反射，
+	//    安卓上约 3~5ms/帧。改为缓存：命中后 60 帧复查一次，未命中时 10 帧重试
+	//    （未命中=不在战斗场景，缩到 10 帧是为了让"进关卡后按钮出现"的延迟不被拉长）。
+	private CheckBox _vanillaCache;
+	private ulong _vanillaCacheFrame;
+
+	private CheckBox VanillaBoxCached()
+	{
+		try
+		{
+			ulong f = Engine.GetProcessFrames();
+			if (_vanillaCache != null && GodotObject.IsInstanceValid(_vanillaCache) && _vanillaCache.IsInsideTree())
+			{
+				if (f - _vanillaCacheFrame < 60UL) { return _vanillaCache; }
+				_vanillaCacheFrame = f;
+				_vanillaCache = FindVanillaBox();
+				return _vanillaCache;
+			}
+			if (f - _vanillaCacheFrame < 10UL) { return null; }
+			_vanillaCacheFrame = f;
+			_vanillaCache = FindVanillaBox();
+			return _vanillaCache;
+		}
+		catch { return null; }
+	}
+
 	private CheckBox FindVanillaBox()
 	{
 		try
@@ -424,6 +791,12 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 		}
 		catch { return null; }
 	}
+
+	/// <summary>★ 性能：样式演示图的整树查找节流（见 TickStyleDemoImage）。</summary>
+	private ulong _styleDemoFrame;
+
+	/// <summary>★ 性能：CheckStyleSync 的轮询节流（见该方法）。</summary>
+	private ulong _styleSyncFrame;
 
 	/// <summary>创建（或找回）自建勾选框；父节点与「加速」相同，保证同一套主题与变换。</summary>
 	private void EnsureBox(CheckBox vanilla)
@@ -653,6 +1026,17 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 			//     （用户要求："将两个加速框放上下一起" —— 即 1.5x 与 3x 相邻。）
 			float myTopG = vGlobal.Y + vVisH + VGapPx;
 
+			// ★★ 2026-10-13（用户实测："复选框样式没法设定位置"）：
+			//   这里原来**只有"贴加速下方"这一种算法**（`SyncSelector` 那边才有 `_posCustom` 分支）✗
+			//   ⇒ 选「4 · 原有复选框」时，位置下拉怎么改都不动。
+			//   现在同样支持自定义百分比坐标（与另外三种样式一致）。
+			if (_posCustom)
+			{
+				Vector2 vpBox = GetViewportSizeForPos();
+				myLeftG = vpBox.X * Mathf.Clamp(_posX, 0, 100) / 100f;
+				myTopG = vpBox.Y * Mathf.Clamp(_posY, 0, 100) / 100f;
+			}
+
 			// ⚠️ 必须**显式设尺寸**：只设 GlobalPosition 时，Control 的尺寸仍由
 			//   锚点+offset 决定（创建时都是 0）⇒ 实际尺寸会退化成 CustomMinimumSize，
 			//   与我算出的 myW/myH 不一致，右对齐就会偏。
@@ -774,37 +1158,22 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 		SetTimeScaleRaw(VanillaAccelScale() * factor);
 	}
 
-	/// <summary>把 `Global.TimeScale` **直接设为给定值**（三档模型用）。</summary>
+	/// <summary>把 `Global.TimeScale` **直接设为给定值**（三档模型用）。
+	/// ★ v1.4.5 修复：`PropertyInfo.CanWrite` 被游戏 BCL 裁剪（get_CanWrite MissingMethodException）
+	///   ⇒ 旧版在检查时就抛异常 ⇒ 所有切档失败（1→3 无反应、2→3 变 1 档）。
+	///   `Global.TimeScale` 是 **public static** 属性 ⇒ 改用编译期直调
+	///   `Global.TimeScale = want`（交接文档铁律：能直调就别反射）。</summary>
 	private void SetTimeScaleRaw(double want)
 	{
 		try
 		{
-			object g = GetSingleton("Global");
-			if (g == null)
+			Global.TimeScale = want;
+			if (Math.Abs(_lastLoggedBase - want) > 0.0001)
 			{
-				return;
-			}
-			PropertyInfo p = g.GetType().GetProperty("TimeScale",
-				BindingFlags.Public | BindingFlags.Static)
-				?? g.GetType().GetProperty("timeScale",
-					BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-			if (p != null && p.CanWrite)
-			{
-				if (p.PropertyType == typeof(double))
-				{
-					p.SetValue(p.GetGetMethod(true).IsStatic ? null : g, want);
-				}
-				else if (p.PropertyType == typeof(float))
-				{
-					p.SetValue(p.GetGetMethod(true).IsStatic ? null : g, (float)want);
-				}
-				if (Math.Abs(_lastLoggedBase - want) > 0.0001)
-				{
-					_lastLoggedBase = want;
-					Diag("TimeScale 设为 " + want.ToString("0.###")
-						+ "（原加速档=" + VanillaAccelScale().ToString("0.###")
-						+ "，当前档位=" + _gear + "）");
-				}
+				_lastLoggedBase = want;
+				Diag("TimeScale 设为 " + want.ToString("0.###")
+					+ "（原加速档=" + VanillaAccelScale().ToString("0.###")
+					+ "，当前档位=" + _gear + "）");
 			}
 		}
 		catch (Exception ex)
@@ -950,20 +1319,52 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	/// 选卡 / 关卡预览阶段是 false ⇒ 那时不显示自建控件（用户要求）。
 	/// ⚠️ 反射拿不到时返回 **true** —— 宁可显示，也不要因为反射失败把功能整个关掉。
 	/// </summary>
+	/// <summary>★ 性能：`IsGameRunning` 的反射结果缓存（方法信息 + 单例引用）。</summary>
+	private MethodInfo _isRunningMi;
+	private object _isRunningMgr;
+	private System.Func<bool> _isRunningFn;   // ★ 编译好的委托（避免每帧 MethodInfo.Invoke）
+
 	private bool IsGameRunning()
 	{
 		try
 		{
-			object mgr = GetSingleton("TowerDefenseManager");
-			if (mgr == null)
+			// ★ 性能（2026-10-13 真机探针：本 Mod 回调 1.65ms/帧）：
+			//   本方法**每帧**被调用，而它原先每帧都做一次
+			//   `mgr.GetType().GetMethod("IsGameRunning", …)`（真反射方法查找）
+			//   + `MethodInfo.Invoke`（真反射调用）。Mono/安卓上这两步就是 ms 级。
+			//   ⇒ 单例与方法信息解析一次后缓存（单例被销毁时 IsInstanceValid 失效自动重解析）。
+			if (_isRunningMi == null || _isRunningMgr == null
+				|| (_isRunningMgr is GodotObject goCached && !GodotObject.IsInstanceValid(goCached)))
 			{
-				return true;
+				object mgr = GetSingleton("TowerDefenseManager");
+				if (mgr == null)
+				{
+					return true;
+				}
+				MethodInfo mi = mgr.GetType().GetMethod("IsGameRunning",
+					BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+				if (mi == null || mi.ReturnType != typeof(bool) || mi.GetParameters().Length != 0)
+				{
+					return true;
+				}
+				_isRunningMgr = mgr;
+				_isRunningMi = mi;
+				// ★★ 关键：把 `MethodInfo.Invoke` **编译成委托**。上一轮只缓存了"找方法"，
+				//   但每帧仍然走 `Invoke`（Mono 上真反射调用，装箱 + 参数检查）。
+				//   委托调用是纳秒级。失败则退回反射（行为不变）。
+				try
+				{
+					_isRunningFn = (System.Func<bool>)System.Delegate.CreateDelegate(
+						typeof(System.Func<bool>), mgr, mi);
+				}
+				catch { _isRunningFn = null; }
 			}
-			MethodInfo m = mgr.GetType().GetMethod("IsGameRunning",
-				BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-			if (m != null && m.ReturnType == typeof(bool) && m.GetParameters().Length == 0)
+			if (_isRunningFn != null)
 			{
-				object r = m.Invoke(mgr, null);
+				return _isRunningFn();
+			}
+			{
+				object r = _isRunningMi.Invoke(_isRunningMgr, null);
 				return !(r is bool b) || b;
 			}
 		}
@@ -1193,13 +1594,276 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	}
 
 	/// <summary>一次性把 10 张素材读进来；任何一张缺失就整体退回代码绘制。</summary>
+	/// <summary>
+	/// 从「Mod 配置」读样式（0/1/2/3 → 三格横排 / 三档竖排 / 单格循环 / 复选框）。
+	/// applyMode = restart ⇒ 改完重启游戏生效（切换样式要重建控件与素材，这样最稳）。
+	/// </summary>
+	/// <summary>
+	/// 读位置设置：auto = 沿用自动布局（右对齐菜单按钮 / 加速下方）；custom = 用绝对坐标（像素）。
+	/// immediate ⇒ 面板改完立即生效。
+	/// </summary>
+	/// <summary>★ 需求 4+6：位置编辑器守候节流帧号。</summary>
+	private static ulong _posEditorFrame;
+	/// <summary>★ 样式重建后重试帧数（素材异步加载完成前重建会退化成代码绘制）。</summary>
+	private static int _styleRebuildRetry;
+
+	/// <summary>
+	/// ★ 需求 4+6：在战斗设置页放「三倍加速 · 位置」编辑器（共享组件 PosEditorRow）。
+	/// 编辑的是**战斗 HUD 里那个加速控件**（勾选框或档位选择器）的位置。
+	/// </summary>
+	private void EnsurePosEditor(Node optionRoot)
+	{
+		try
+		{
+			float bw = 102f, bh = 64f;
+			try
+			{
+				Control c = null;
+				if (_sel != null && GodotObject.IsInstanceValid(_sel)) { c = _sel; }
+				else if (_box != null && GodotObject.IsInstanceValid(_box)) { c = _box; }
+				if (c != null)
+				{
+					if (c.Size.X > 1f) { bw = c.Size.X; }
+					if (c.Size.Y > 1f) { bh = c.Size.Y; }
+				}
+			}
+			catch { }
+			// ★ 2026-10-13（用户要求）：样式也能在战斗设置页里改，与配置页双向同步
+			PosEditorRow.EnsureStyleRow(optionRoot, "dststyle", "加速样式",
+				new string[] { "1", "2", "3", "4" },
+				new string[] { "1 · 三格横排", "2 · 三档竖排", "3 · 单格循环", "4 · 原有复选框" },
+				ReadStyleSetting(),
+				ApplyStyleFromEditor);
+			PosEditorRow.Ensure(optionRoot, "dst", "三倍加速 · 位置",
+				new string[] { "auto", "custom" },
+				new string[] { "自动（对齐菜单按钮）", "自定义绝对坐标" },
+				"custom", ReadPosPreset(), _posX, _posY, bw, bh, ApplyPosFromEditor);
+		}
+		catch { }
+	}
+
+	/// <summary>读当前 positionMode（兼容 string / JsonElement；取不到按内存值推）。</summary>
+	private string ReadPosPreset()
+	{
+		try
+		{
+			object v = (_context == null) ? null : _context.Settings.Get<object>(KPositionMode);
+			string s = null;
+			if (v is string str) { s = str; }
+			else if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.String)
+			{
+				s = je.GetString();
+			}
+			if (!string.IsNullOrWhiteSpace(s)) { return s.Trim(); }
+		}
+		catch { }
+		return _posCustom ? "custom" : "auto";
+	}
+
+	/// <summary>★ 编辑器回调：写回配置 + 立即套用（SyncBox/SyncSelector 下一帧就会摆到位）。</summary>
+	private void ApplyPosFromEditor(string preset, int x, int y)
+	{
+		try
+		{
+			_posCustom = (preset == "custom");
+			_posX = x;
+			_posY = y;
+			try
+			{
+				var changes = new System.Collections.Generic.Dictionary<string, object>();
+				changes[KPositionMode] = preset;
+				changes[KCustomX] = x;
+				changes[KCustomY] = y;
+				_context?.Settings?.TrySave(changes, out XWModSettingsSaveResult _);
+			}
+			catch { }
+			ApplyPositionSetting();
+		}
+		catch { }
+	}
+
+
+	/// <summary>读了当前样式值（供设置页样式行回填）。</summary>
+
+	/// <summary>★ 2026-10-13：取可视视口尺寸（百分比坐标换算用；取不到按设计分辨率）。</summary>
+	private Vector2 GetViewportSizeForPos()
+	{
+		try
+		{
+			Node rt = (_tree != null && GodotObject.IsInstanceValid(_tree)) ? _tree.Root : null;
+			if (rt != null)
+			{
+				Vector2 v = rt.GetViewport()?.GetVisibleRect().Size ?? Vector2.Zero;
+				if (v.X > 100f && v.Y > 100f) { return v; }
+			}
+		}
+		catch { }
+		return new Vector2(1080f, 600f);
+	}
+
+	private string ReadStyleSetting()
+	{
+		try
+		{
+			object v = (_context == null) ? null : _context.Settings.Get<object>(KStyle);
+			if (v is string s) { return s; }
+			if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.String) { return je.GetString(); }
+		}
+		catch { }
+		return "1";
+	}
+
+	/// <summary>
+	/// ★ 设置页样式行回调：写回配置 + **立即重建战斗 HUD 控件**（与配置页双向同步）。
+	///
+	/// 实测"修改样式无效"的原因：战斗 HUD 里那个三格/竖排/单格控件是**开战时按当时的 Style 建好**的，
+	/// 本 Mod 原有的热更新路径只重画配置页的演示图，不会重建战场控件 ⇒ 改完样式要重开一局才看到。
+	/// 这里把旧控件 QueueFree 掉，交给下面每帧跑的 `SyncBox` / `SyncSelector` 按新 Style 重建（它们本来就会"没有就建"）。
+	/// </summary>
+	private void ApplyStyleFromEditor(string value)
+	{
+		try
+		{
+			try
+			{
+				var ch = new System.Collections.Generic.Dictionary<string, object>();
+				ch[KStyle] = value;
+				bool _ok = _context?.Settings?.TrySave(ch, out XWModSettingsSaveResult _res) ?? false;
+				try { Diag("样式写配置 ok=" + _ok + " value=" + value); } catch { }
+			}
+			catch { }
+			// ★★ 2026-10-13（用户实测"改了样式还是没效果"）：**不再只依赖配置往返**——
+			//   宿主把新值推回实时快照这条链有一次没走通就全盘无效，所以这里**直接把字段改掉**，
+			//   再做与该 Mod 自己的热更新完全相同的操作（允许重建 + 释放旧控件）⇒ 下一帧必重建。
+			try
+			{
+				ApplyStyleSetting();   // ★ 先按配置对齐（它可能读到旧值，下面再直接写一次覆盖它）
+				BtnStyle want = Style;
+				if (value == "1" || value.Equals("tri", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.TriHorizontal; }
+				else if (value == "2" || value.Equals("vert", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.TriVertical; }
+				else if (value == "3" || value.Equals("single", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.SingleGear; }
+				else if (value == "4" || value.Equals("checkbox", StringComparison.OrdinalIgnoreCase)) { want = BtnStyle.CheckBox; }
+				Style = want;
+				_selBuilt = false;
+				try { HideSelector(); } catch { }
+				if (_sel != null && GodotObject.IsInstanceValid(_sel)) { _sel.QueueFree(); }
+				_sel = null;
+				try { _cells.Clear(); } catch { }
+				if (_box != null && GodotObject.IsInstanceValid(_box)) { _box.QueueFree(); _box = null; }
+				Diag("样式已由设置页改为：" + Style + "（战场控件下一帧重建）");
+			}
+			catch { }
+			// ★★ 2026-10-13（日志实证：改完样式 `sel=null` ⇒ 旧控件被释放后再没重建）：
+			//   **直接调用该 Mod 自己的创建/布局路径重建一次**，不再干等每帧那条链
+			//   （它每场战斗只建一次的风格，等不到就会一直是空的）。
+			try
+			{
+				CheckBox van = VanillaBoxCached();
+				// ★★ 2026-10-13（用户实测："1·三格横排 怎么变成代码绘制的箭头了、原来有素材"）：
+				//   直接在回调里重建时会**赶在素材加载完成之前**（`_artOk` 还是 false）⇒ 走成代码绘制，
+				//   而 `_selBuilt` 已置位 ⇒ 每帧路径认为"建过了"，素材就再也不出现了 ✗。
+				//   先 `EnsureArt()` 强制加载素材，再重建；并登记重试几帧兜底。
+				try { EnsureArt(); } catch { }
+				EnsureSelector(van);
+				SyncSelector(van);
+				_styleRebuildRetry = 3;
+				Diag("样式重建结果：sel=" + ((_sel == null) ? "null(未建)" : "ok")
+					+ " cells=" + _cells.Count + " 样式=" + (int)Style);
+			}
+			catch (Exception ex)
+			{
+				try { Diag("样式重建异常：" + ex.Message); } catch { }
+			}
+			// ★ 这里**不能再调 ApplyStyleSetting()**：它会用（可能未更新的）配置值覆盖我的直接写入 ✗
+			//   —— 这正是"切换加速样式还是不行"的原因。
+		}
+		catch { }
+	}
+
+	private void ApplyPositionSetting()
+	{
+		try
+		{
+			object v = (_context == null) ? null : _context.Settings.Get<object>(KPositionMode);
+			string s = null;
+			if (v is string str) { s = str; }
+			else if (v is System.Text.Json.JsonElement je)
+			{
+				if (je.ValueKind == System.Text.Json.JsonValueKind.String) { s = je.GetString(); }
+				else if (je.ValueKind == System.Text.Json.JsonValueKind.Number) { s = je.ToString(); }
+			}
+			if (!string.IsNullOrWhiteSpace(s))
+			{
+				s = s.Trim();
+				_posCustom = s.Equals("custom", StringComparison.OrdinalIgnoreCase) || s == "2";
+			}
+			_posX = ReadIntSetting(KCustomX, _posX);
+			_posY = ReadIntSetting(KCustomY, _posY);
+		}
+		catch { }
+	}
+
+	/// <summary>读整数配置（兼容 long / JsonElement / string）。</summary>
+	private int ReadIntSetting(string key, int fallback)
+	{
+		try
+		{
+			object v = (_context == null) ? null : _context.Settings.Get<object>(key);
+			if (v == null) { return fallback; }
+			if (v is System.Text.Json.JsonElement je)
+			{
+				if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out int n)) { return n; }
+				if (je.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(je.GetString(), out int ns)) { return ns; }
+				return fallback;
+			}
+			return Convert.ToInt32(v, System.Globalization.CultureInfo.InvariantCulture);
+		}
+		catch { return fallback; }
+	}
+
+	private void ApplyStyleSetting()
+	{
+		try
+		{
+			object v = (_context == null) ? null : _context.Settings.Get<object>(KStyle);
+			string s = null;
+			if (v is string str) { s = str; }
+			else if (v is System.Text.Json.JsonElement je)
+			{
+				if (je.ValueKind == System.Text.Json.JsonValueKind.String) { s = je.GetString(); }
+				else if (je.ValueKind == System.Text.Json.JsonValueKind.Number) { s = je.ToString(); }
+			}
+			if (string.IsNullOrWhiteSpace(s)) { return; }
+			s = s.Trim();
+			if (s == "1" || s.Equals("tri", StringComparison.OrdinalIgnoreCase)) { Style = BtnStyle.TriHorizontal; }
+			else if (s == "2" || s.Equals("vert", StringComparison.OrdinalIgnoreCase)) { Style = BtnStyle.TriVertical; }
+			else if (s == "3" || s.Equals("single", StringComparison.OrdinalIgnoreCase)) { Style = BtnStyle.SingleGear; }
+			else if (s == "4" || s.Equals("checkbox", StringComparison.OrdinalIgnoreCase)) { Style = BtnStyle.CheckBox; }
+		}
+		catch { }
+	}
+
+	/// <summary>★ 2026-10-13：已加载素材对应的样式（素材按样式分三套，样式变了必须重载）。</summary>
+	private BtnStyle _artStyleLoaded;
+	private bool _artStyleInit;
+
 	private void EnsureArt()
 	{
-		if (_artTried)
+		// ★★ 2026-10-13（用户实测："2 和 3 直接不显示了"）：
+		//   素材是**按样式分三套**的（style1_gear*=三格横排 / style2_gear*=三档竖排 / style3_gear*=单格循环），
+		//   而这里原来只 `if (_artTried) return;` —— **只在第一次按当时的样式加载一套，永不重载** ✗。
+		//   于是从 1 切到 2/3 时，仍拿"三格横排"那张图去画竖排/单格 ⇒ 尺寸对不上 ⇒ 控件直接不显示 ✗。
+		//   现在：**记住已加载素材属于哪个样式，样式一变就重新加载对应那套**。
+		if (_artTried && _artStyleInit && _artStyleLoaded == Style)
 		{
 			return;
 		}
 		_artTried = true;
+		_artStyleInit = true;
+		_artStyleLoaded = Style;
+		_artOk = false;
+		_texArrow[0] = null; _texArrow[1] = null; _texArrow[2] = null;
+		_sbFrameArt = null;
 		try
 		{
 			if (!UseArt)
@@ -1560,8 +2224,21 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 			// 右边缘：★ 用户要求 —— **右对齐到「菜单」按钮**（拿不到才退回对齐「加速」）
 			//   菜单按钮的视觉右边缘已在前面算好（`pauseRightX`）。
 			float rightX = (pauseRightX > 0.5f) ? pauseRightX : vRightX;
-			float myLeftG = rightX - want.X;
-			float myTopG = vGlobal.Y;
+			// 位置设置：自定义坐标时直接用绝对坐标，不走自动布局
+			float myLeftG, myTopG;
+			if (_posCustom)
+			{
+				// ★★ 2026-10-13（用户实测"加速无效、X 到 91/92 就顶"）：**这里之前还在按像素用** ✗
+				//   （上一轮我只改了时停的套用处）⇒ customX/customY 现在是 0~100 百分比，按视口换算。
+				Vector2 vpPct = GetViewportSizeForPos();
+				myLeftG = vpPct.X * Mathf.Clamp(_posX, 0, 100) / 100f;
+				myTopG = vpPct.Y * Mathf.Clamp(_posY, 0, 100) / 100f;
+			}
+			else
+			{
+				myLeftG = rightX - want.X;
+				myTopG = vGlobal.Y;
+			}
 
 			sel.CustomMinimumSize = want;
 			sel.Size = want;
@@ -1604,7 +2281,112 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 	///   0 = 正常速度（`baseTimeScale`）
 	///   1 = 游戏加速（`baseTimeScale × 1.5`，QUIZ 关 ×3）
 	///   2 = 本 Mod 加速（在游戏加速档上再 ×`DoubleFactor`）
+	/// </summary>	/// <summary>快捷键配置字符串 → Key（空 = None；单字符 ASCII；多字符按枚举名）。</summary>
+	/// <summary>★ 性能：`ParseKeySetting` 是 `Enum.TryParse`（Mono 上靠反射），而它在每帧路径上
+	/// 被调用；绑定串不变时结果也不会变 ⇒ 按字符串缓存。</summary>
+	private string _pkFrom;
+	private Key _pkCached;
+
+	private Key ParseKeySettingCached(string s)
+	{
+		if (s == _pkFrom)
+		{
+			return _pkCached;
+		}
+		_pkFrom = s;
+		_pkCached = ParseKeySetting(s);
+		return _pkCached;
+	}
+
+	private static Key ParseKeySetting(string s)
+	{
+		try
+		{
+			if (string.IsNullOrWhiteSpace(s)) { return Key.None; }
+			s = s.Trim();
+			if (s.Length == 1)
+			{
+				int code = s[0];
+				if (code >= 32 && code <= 126) { return (Key)code; }
+				return Key.None;
+			}
+			if (Enum.TryParse(s, true, out Key k)) { return k; }
+			return Key.None;
+		}
+		catch { return Key.None; }
+	}
+
+	/// <summary>把录到的键写回配置（hotkeyNext），立即生效。</summary>
+	private void WriteHotkeySetting(string keySetting)
+	{
+		try
+		{
+			if (_context?.Settings == null) { Warn("配置不可用，快捷键未保存。"); return; }
+			var changes = new System.Collections.Generic.Dictionary<string, object>();
+			changes[KHotkeyNext] = keySetting ?? "";
+			if (_context.Settings.TrySave(changes, out XWModSettingsSaveResult result))
+			{
+				Info("快捷键已保存：" + (string.IsNullOrEmpty(keySetting) ? "（无绑定）" : keySetting) + "（" + result.Message + "）");
+			}
+			else
+			{
+				Warn("快捷键保存失败：" + result.Message);
+			}
+		}
+		catch (Exception ex) { Warn("快捷键保存异常：" + ex.Message); }
+	}
+
+	/// <summary>读取快捷键字符（默认无绑定；enum 下拉或录制面板写回）。</summary>
+	private string ReadHotkey()
+	{
+		try
+		{
+			object v = (_context == null) ? null : _context.Settings.Get<object>(KHotkeyNext);
+			string s = null;
+			if (v is string str) { s = str; }
+			else if (v is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.String) { s = je.GetString(); }
+			if (!string.IsNullOrWhiteSpace(s)) { return s.Trim(); }
+		}
+		catch { }
+		return "";
+	}
+
+	/// <summary>
+	/// 快捷键：在三个档位间循环（0 → 1 → 2 → 0），走与点格子相同的 ApplyGear。
+	/// ⚠️ 无源生成器 ⇒ 不能用 _Input；独立一条 process_frame 连接，不动原有主循环。
 	/// </summary>
+	private void OnHotkeyTick()
+	{
+		try
+		{
+			// ★ v1.4.4：键位录制会话期间跳过（防录到的键被当快捷键执行）
+			if (KeybindPanelManager.IsCapturing()) { _hotkeyPrev = false; return; }
+			if (!IsGameRunning())
+			{
+				_hotkeyPrev = false;
+				return;   // 没进游戏不响应（与显示门控一致）
+			}
+			string key = ReadHotkey();
+			if (string.IsNullOrEmpty(key)) { return; }
+			// ★ 2026-10-13 修：原 `char ch = key[0]` 对 VolumeUp/VolumeDown 这类枚举名键
+			//   会退化成首字母（录"手机音量+"实际轮询字母 V）⇒ 按音量键毫无反应、
+			//   只触发了系统音量。改用 ParseKeySettingCached（Enum.TryParse + 按串缓存）。
+			Key hk = ParseKeySettingCached(key);
+			if (hk == Key.None) { return; }
+			bool down = false;
+			try { down = Input.IsKeyPressed(hk); } catch { }
+			if (down && !_hotkeyPrev)
+			{
+				int next = (_gear + 1) % 3;
+				Info("快捷键 " + key + " 切换档位 → " + next);
+				ApplyGear(next);
+			}
+			_hotkeyPrev = down;
+		}
+		catch { }
+	}
+
+
 	private void ApplyGear(int g)
 	{
 		try
@@ -1916,6 +2698,11 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 
 	private void Info(string msg)
 	{
+		// ★ 2026-10-14：原先绕过日志开关，现统一受「输出诊断日志」(EnableDiagLog) 控制
+		if (!EnableDiagLog)
+		{
+			return;
+		}
 		try
 		{
 			if (_context != null) { _context.Log(LogPrefix + msg); }
@@ -1926,6 +2713,8 @@ public sealed class DoubleSpeedToggleEntry : IXWModRuntimeEntry
 
 	private void Warn(string msg)
 	{
+		if (!EnableDiagLog) { return; }
+		// ★ 2026-10-14：该输出原先绕过日志开关，现统一受 enableLog 控制
 		try
 		{
 			if (_context != null) { _context.Warn(LogPrefix + msg); }

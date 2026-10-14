@@ -2,22 +2,445 @@
   "schemaVersion": 2,
   "id": "doublespeedtoggle",
   "name": "三倍加速",
-  "version": "1.3.5",
-  "author": "本地",
-  "description": "v1.3.5：确定使用【样式 1】（三格横排，未选中橙/选中红，110x36，点哪档跳哪档）。\nv1.3.4：当前切到【样式 4】（原有复选框：游戏自带加速 + 本 Mod 复选框，两者间距已从 6px 缩到 2px）。\nv1.3.3：当前切到【样式 3】（单格：只显示当前档，单击循环，格子颜色=档位色）。\nv1.3.2：当前切换到【样式 2】（三档竖向叠放同时显示，未选中绿 / 选中红，105x110）；同时补齐素材前缀映射，以及控件尺寸直接取素材 1x 尺寸的布局逻辑。\nv1.3.1：修复「能重复点已经选中的速度」—— 点当前档位时**直接早退**，不再重复施加 TimeScale、也**不再放音效**。\nv1.3.0：按钮改为**手绘素材**（9 张 PNG 随包分发）—— 样式 1（三格横排）/ 样式 2（三档竖排）/ 样式 3（单格），各 3 档；箭头为「一根杆 + N 个同尺寸实心三角头」且格内居中；素材缺失自动退回代码绘制。\nv1.2.0：按钮改为**手绘素材**（10 张 PNG，随包分发在 Resources/）—— 外框/格子底色/箭头全部用贴图（九宫拉伸），箭头改成图形不再受字体影响；素材缺失时自动退回原来的代码绘制。默认为样式 1（三格横排）。\nv1.1.10：当前切到**样式 4**（原有复选框：游戏自带「加速」+ 本 Mod 复选框两个，两者间距已从 6px 缩到 2px）。\nv1.1.9：配色改为**按档位表示** —— 档位 1（正常速度）绿、档位 2（游戏加速）橙、档位 3（Mod 加速）红；文字统一白字+黑描边。单格样式下格子颜色即当前档位颜色；三格样式下每格用自己那一档的颜色、当前档用亮色其余压暗。\nv1.1.8：样式 3（单格）宽度改为**与「菜单」/「时停」按钮等长** —— 直接取菜单按钮 GUITop/ButtonPause 的视觉宽度（含 scale），减掉内边距与描边后作为格子宽度。\nv1.1.7：当前切到**样式 3**（单格：只显示当前档位箭头，单击循环 0→1→2→0）。样式 2 竖排因高度过大（约 116px）会与「时停」重叠，暂不使用。\nv1.1.6：点击方式定稿 —— 样式 1/2 **点哪档跳哪档**（不再提供循环/混合方式，开关已删除）；样式 3 单格单击循环。当前切到**样式 2（三格竖排）**；并修掉竖排尺寸公式 bug（原来一律按三列宽算，竖排会撑成很宽的大方块）与竖排格子高度（28 → 34）。\nv1.1.5：修复格子宽度每帧抽动 —— 根因是**按当前字号量文字宽度**再据此改字号，形成 16→12→16 的每帧震荡；改为固定按基准字号测量，一次定下来不再变。并把格子宽度下限 40→26，使宽度真正由一二档文字决定（此前 40 的下限盖住了文字宽度，所以改了跟没改一样）。\nv1.1.4：三格等宽改为**按一二档字符（-> / ->>）的宽度**统一；第三档 ->>> 字符更多，自动按比例缩小它的字号到刚好装下（不裁切、不撑宽）。\nv1.1.3：三格改为**等宽** —— 一二档宽度补到最长字符串 ->>> 的总宽（按各格实际最小宽取最大值后统一）。\nv1.1.2：三格控件改为**右对齐游戏「菜单」按钮**（GUITop/ButtonPause），不再对齐加速复选框；拿不到该按钮时自动退回旧行为。\nv1.1.1：按用户反馈 ① 控件**整体缩小**（三格 62x38 → 40x28、箭头字号 26 → 16、外框圆角/描边/内边距一并收紧，总宽约缩 35%）；② **只在游戏正式开始后显示** —— 用游戏自己的 `TowerDefenseManager.IsGameRunning()` 判定，选卡/关卡预览阶段收起自建控件并把游戏自带复选框还原成原样。\nv1.1.0：加速按钮改为**三档模型**（正常速度 / 游戏加速 / Mod 加速）并新增 4 种样式，由源码内部开关 `Style` 控制：1=三格横排（->  ->>  ->>>，未选中橙、选中红；点当前格切下一档、点其它格直接跳，或改成纯循环/纯直选）；2=三格竖排；3=单格只显示当前档、单击循环；4=原有复选框（并把与游戏「加速」的间距从 6px 缩到 2px）。样式 1/2/3 会隐藏游戏自带复选框（三档里已含原版加速一档）。在游戏自带「加速」复选框的**正下方**新增一个勾选框：勾选后在原有加速的基础上再乘 2（普通关卡最终为 3 倍，界面文本直接显示实际倍率），同时自动取消原有的加速（互斥），取消勾选回到普通速度。v1.0.7：作品名由「双倍加速」改为「三倍加速」，与界面显示的 3x 口径统一（Mod ID 与仓库名不变）。v1.0.6：关闭诊断日志。v1.0.5：勾选框**整体大小与原版完全一致**（原版带 scale 0.78，本框此前用 1 所以偏大；现连 scale 与布局尺寸一起对齐）。v1.0.4：紧贴「加速」下方（两个加速框相邻），「时停」自动排到本框之下。v1.0.3：界面文本显示实际倍率（普通关 1.5x 与 3x）。",
+  "version": "1.4.8",
+  "author": "apples1949",
+  "description": "把游戏速度提到 3 倍：三档模型（正常 / 游戏加速 1.5x / 本 Mod 3x），四档按钮样式可选，支持快捷键与档位按钮两种切换方式。关于页有样式演示图。",
+  "playInstructions": "在战斗中把游戏速度提到 3 倍。\n1. 进关卡后右上角出现档位按钮（默认三格横排）：绿=正常速度、橙=游戏自带加速、红=本 Mod 3 倍加速，点哪档跳哪档。\n2. 快捷键：配置页下拉选键，或点「录制快捷键」按钮后直接按键录入。\n3. 游戏自带 1.5x 复选框默认隐藏（档位按钮已含 1.5x 档）；要在「显示游戏自带加速复选框」开关里打开。\n4. 样式、位置都在配置页；样式演示图在「关于」页。",
   "dependencies": [],
   "conflicts": [],
   "provides": {},
   "overrides": {},
   "scripts": [],
+  "settings": [
+    {
+      "key": "style",
+      "type": "enum",
+      "label": "按钮样式",
+      "group": "外观",
+      "default": "1",
+      "description": "控件外观样式。改完**立刻生效**（战斗中的控件会按新样式重建）。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "options": [
+        {
+          "value": "1",
+          "label": "1 · 三格横排"
+        },
+        {
+          "value": "2",
+          "label": "2 · 三档竖排"
+        },
+        {
+          "value": "3",
+          "label": "3 · 单格循环"
+        },
+        {
+          "value": "4",
+          "label": "4 · 原有复选框"
+        }
+      ]
+    },
+    {
+      "key": "positionMode",
+      "type": "enum",
+      "label": "控件位置",
+      "group": "外观",
+      "default": "auto",
+      "description": "auto = 右对齐「菜单」按钮（默认）；custom = 用下面的绝对坐标。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动（对齐菜单按钮）"
+        },
+        {
+          "value": "custom",
+          "label": "自定义绝对坐标"
+        }
+      ]
+    },
+    {
+      "key": "customX",
+      "type": "int",
+      "label": "自定义 X（%）",
+      "group": "外观",
+      "default": 1,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "description": "按钮左边缘位置，按屏幕宽度的百分比（0 = 最左，100 = 最右）。不再随窗口大小变。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "visibleWhen": {
+        "key": "positionMode",
+        "op": "eq",
+        "value": "custom"
+      }
+    },
+    {
+      "key": "customY",
+      "type": "int",
+      "label": "自定义 Y（%）",
+      "group": "外观",
+      "default": 33,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "description": "按钮上边缘位置，按屏幕高度的百分比（0 = 最上，100 = 最下）。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "visibleWhen": {
+        "key": "positionMode",
+        "op": "eq",
+        "value": "custom"
+      }
+    },
+    {
+      "key": "hotkeyNext",
+      "type": "enum",
+      "label": "切换档位快捷键",
+      "group": "功能",
+      "default": "",
+      "description": "切档快捷键（默认无绑定）。下拉选键；也可点下方「快捷键录制」面板里的录制按钮直接按键录入。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "options": [
+        {
+          "value": "",
+          "label": "（无绑定）"
+        },
+        {
+          "value": "A",
+          "label": "A"
+        },
+        {
+          "value": "B",
+          "label": "B"
+        },
+        {
+          "value": "C",
+          "label": "C"
+        },
+        {
+          "value": "D",
+          "label": "D"
+        },
+        {
+          "value": "E",
+          "label": "E"
+        },
+        {
+          "value": "F",
+          "label": "F"
+        },
+        {
+          "value": "G",
+          "label": "G"
+        },
+        {
+          "value": "H",
+          "label": "H"
+        },
+        {
+          "value": "I",
+          "label": "I"
+        },
+        {
+          "value": "J",
+          "label": "J"
+        },
+        {
+          "value": "K",
+          "label": "K"
+        },
+        {
+          "value": "L",
+          "label": "L"
+        },
+        {
+          "value": "M",
+          "label": "M"
+        },
+        {
+          "value": "N",
+          "label": "N"
+        },
+        {
+          "value": "O",
+          "label": "O"
+        },
+        {
+          "value": "P",
+          "label": "P"
+        },
+        {
+          "value": "Q",
+          "label": "Q"
+        },
+        {
+          "value": "R",
+          "label": "R"
+        },
+        {
+          "value": "S",
+          "label": "S"
+        },
+        {
+          "value": "T",
+          "label": "T"
+        },
+        {
+          "value": "U",
+          "label": "U"
+        },
+        {
+          "value": "V",
+          "label": "V"
+        },
+        {
+          "value": "W",
+          "label": "W"
+        },
+        {
+          "value": "X",
+          "label": "X"
+        },
+        {
+          "value": "Y",
+          "label": "Y"
+        },
+        {
+          "value": "Z",
+          "label": "Z"
+        },
+        {
+          "value": "0",
+          "label": "0"
+        },
+        {
+          "value": "1",
+          "label": "1"
+        },
+        {
+          "value": "2",
+          "label": "2"
+        },
+        {
+          "value": "3",
+          "label": "3"
+        },
+        {
+          "value": "4",
+          "label": "4"
+        },
+        {
+          "value": "5",
+          "label": "5"
+        },
+        {
+          "value": "6",
+          "label": "6"
+        },
+        {
+          "value": "7",
+          "label": "7"
+        },
+        {
+          "value": "8",
+          "label": "8"
+        },
+        {
+          "value": "9",
+          "label": "9"
+        },
+        {
+          "value": "F1",
+          "label": "F1"
+        },
+        {
+          "value": "F2",
+          "label": "F2"
+        },
+        {
+          "value": "F3",
+          "label": "F3"
+        },
+        {
+          "value": "F4",
+          "label": "F4"
+        },
+        {
+          "value": "F5",
+          "label": "F5"
+        },
+        {
+          "value": "F6",
+          "label": "F6"
+        },
+        {
+          "value": "F7",
+          "label": "F7"
+        },
+        {
+          "value": "F8",
+          "label": "F8"
+        },
+        {
+          "value": "F9",
+          "label": "F9"
+        },
+        {
+          "value": "F10",
+          "label": "F10"
+        },
+        {
+          "value": "F11",
+          "label": "F11"
+        },
+        {
+          "value": "F12",
+          "label": "F12"
+        },
+        {
+          "value": "Space",
+          "label": "空格"
+        },
+        {
+          "value": "Enter",
+          "label": "Enter"
+        },
+        {
+          "value": "Tab",
+          "label": "Tab"
+        },
+        {
+          "value": "Insert",
+          "label": "Insert"
+        },
+        {
+          "value": "Delete",
+          "label": "Delete"
+        },
+        {
+          "value": "Home",
+          "label": "Home"
+        },
+        {
+          "value": "End",
+          "label": "End"
+        },
+        {
+          "value": "Pageup",
+          "label": "PageUp"
+        },
+        {
+          "value": "Pagedown",
+          "label": "PageDown"
+        },
+        {
+          "value": "Up",
+          "label": "方向↑"
+        },
+        {
+          "value": "Down",
+          "label": "方向↓"
+        },
+        {
+          "value": "Left",
+          "label": "方向←"
+        },
+        {
+          "value": "Right",
+          "label": "方向→"
+        },
+        {
+          "value": "Minus",
+          "label": "-"
+        },
+        {
+          "value": "Equal",
+          "label": "="
+        },
+        {
+          "value": "Comma",
+          "label": ","
+        },
+        {
+          "value": "Period",
+          "label": "."
+        },
+        {
+          "value": "VolumeUp",
+          "label": "手机音量+"
+        },
+        {
+          "value": "VolumeDown",
+          "label": "手机音量-"
+        },
+        {
+          "value": "VolumeMute",
+          "label": "手机静音"
+        }
+      ]
+    },
+    {
+      "key": "showVanillaCheckBox",
+      "type": "bool",
+      "label": "显示游戏自带「加速」复选框",
+      "group": "功能",
+      "default": false,
+      "description": "开 = 游戏自带的 1.5x 加速复选框保持显示（本 Mod 档位按钮已含 1.5x 档，一般无需打开）；关（默认）= 隐藏它，速度档全部由本 Mod 的档位按钮管理。",
+      "applyMode": "immediate",
+      "affectsGameplay": false
+    },
+    {
+      "key": "aboutStyles",
+      "type": "text",
+      "label": "按钮样式说明",
+      "group": "关于",
+      "content": "样式说明（宿主面板不支持图片，这里用文字描述；想看图的见下方链接）\n1 · 三格横排：三个格子并排，未选中橙、选中红；箭头是实心三角，格内居中。\n2 · 三档竖排：三档上下叠放同时显示，未选中绿、选中红；三档都能一眼看到。\n3 · 单格循环：只有一格，颜色=当前档位（绿=1x / 橙=1.5x / 红=3x），单击循环切换。\n4 · 原有复选框：游戏自带「1.5x」+ 本 Mod「3x」两个复选框，间距 2px。"
+    },
+    {
+      "key": "aboutStyleImages",
+      "type": "richtext",
+      "label": "样式演示图",
+      "group": "关于",
+      "content": "四档按钮样式演示图见上方图片（三格横排 / 三档竖排 / 单格循环 / 双复选框）。"
+    },
+    {
+      "key": "aboutChangelog",
+      "type": "text",
+      "label": "更新内容",
+      "group": "关于",
+      "content": "v1.4.8 · 2026-10-12\n手机端录制「音量键」保存失败（提示「配置 'hotkeyNext' 的值无效」）：录制面板把键名转成配置值时用的是 Godot 枚举名 `Volumeup`（Volume 后小写），而配置项选项写的是 `VolumeUp`，两边拼写不一致被宿主校验拒绝。现在统一映射成选项拼写；顺带修好 Space / - / = / , / . 这五个键（旧逻辑会把它们转成空白或符号而失配）。\nv1.4.7 · 2026-10-11\n修复：过关/失败/离开关卡后加速档位不重置（下次进关仍保留上一关的加速）——现在战斗结束自动回到正常速度。\nv1.4.5 · 2026-10-11\n修复：所有档位切换失败（1→3 无反应、2→3 变 1 档）——TimeScale 反射的 get_CanWrite 被游戏 BCL 裁剪，改编译期直调 Global.TimeScale。\nv1.4.3 · 2026-10-11\n修复：样式修改重启不生效（改为保存后立即热重建，无需重启）；录制面板与配置页按钮回归。\nv1.4.3 · 2026-10-11\n修复：样式热更新（订阅+拆旧控件）。\nv1.4.2 · 2026-10-11\n演示图移到说明文字下方。\nv1.4.1 · 2026-10-11\n精简：移除面板与 GitHub 字样；详情描述改一句话。\nv1.4.0 · 2026-10-11\n快捷键下拉+录制；原生复选框开关；样式演示图。\nv1.3.5 及更早（略）。"
+    },
+    {
+      "key": "enableLog",
+      "type": "bool",
+      "label": "输出诊断日志",
+      "group": "诊断",
+      "description": "排查问题时打开，会把运行状态写进 godot.log。平时关掉，不刷日志。",
+      "applyMode": "immediate",
+      "affectsGameplay": false,
+      "default": false
+    },
+    {
+      "key": "aboutAuthor",
+      "type": "richtext",
+      "label": "作者与链接",
+      "group": "关于",
+      "content": "三倍加速 v1.4.8 · 作者：apples1949\n\n[url=https://space.bilibili.com/186773722]B 站空间[/url]\n[url=https://apples1949.lanzouc.com/b007uuknqd]蓝奏云下载（密码 762b）[/url]\n\n本模组为玩家自制 Mod，与《植物大战僵尸杂交重制版》官方无隶属关系。\n赞助：微信扫码支持作者（见下方收款码图片）。"
+    }
+  ],
   "runtimeAssembly": "Runtime/ModAssembly.dll",
   "runtimeEntryType": "DoubleSpeedToggleEntry",
-  "runtimeApiVersion": 1,
+  "runtimeApiVersion": 3,
   "runtimeAssemblyPolicy": "optional",
   "blueprints": [],
   "translations": [],
   "resources": [
-    "Runtime/ModAssembly.dll",
+    "Resources/SponsorQR.png",
     "Resources/style1_gear1.png",
     "Resources/style1_gear2.png",
     "Resources/style1_gear3.png",
@@ -26,6 +449,8 @@
     "Resources/style2_gear3.png",
     "Resources/style3_gear1.png",
     "Resources/style3_gear2.png",
-    "Resources/style3_gear3.png"
+    "Resources/style3_gear3.png",
+    "Resources/StyleDemo.png",
+    "Runtime/ModAssembly.dll"
   ]
 }
